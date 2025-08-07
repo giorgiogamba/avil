@@ -15,6 +15,7 @@ void checkError(const PaError& error)
     }
 }
 
+/* Performs the action following the streaming capture */
 int paCallback ( const void* inputBuffer
                 , void* outputBuffer
                 , unsigned long framesPerBuffer
@@ -22,15 +23,15 @@ int paCallback ( const void* inputBuffer
                 , PaStreamCallbackFlags statusFlags
                 , void* userData )
 {
-    float* in = (float*) inputBuffer;
+    const float* in = (float*) inputBuffer;
     (void) outputBuffer;
 
-    int displaySize = 100;
+    constexpr int displaySize = 50;
     std::cout << "\r";
 
+    // Gets greatest volume in the buffer for L and R channels
     float volume_L = 0;
     float volume_R = 0;
-
     // Parse over elements considering them in couples L, R
     for (unsigned long i = 0; i < framesPerBuffer * 2; i += 2)
     {
@@ -38,25 +39,12 @@ int paCallback ( const void* inputBuffer
         volume_R = std::max(volume_R, std::abs(in[i+1]));
     }
 
+    // Prints resulting volume bars
     for (int i = 0; i < displaySize; ++i)
     {
         const float bar = i / (float) displaySize;
-        if (bar <= volume_L && bar <= volume_R)
-        {
-            std::cout << "||";
-        }
-        else if (bar <= volume_L)
-        {
-            std::cout << "'";
-        }
-        else if (bar <= volume_R)
-        {
-            std::cout << ",";
-        }
-        else
-        {
-            std::cout << " ";
-        }
+        const std::string volumeBar = (bar <= volume_L && bar <= volume_R) ? "|" : " ";
+        std::cout << volumeBar;
     }
 
     fflush(stdout);
@@ -66,24 +54,29 @@ int paCallback ( const void* inputBuffer
 
 int main()
 {
+    // Every time a Pa operation is performed, its value is checked in order
+    // to spot problems
     PaError error;
+
     error = Pa_Initialize();
     checkError(error);
 
     const int numDevices = Pa_GetDeviceCount();
     std::cout << "Number of devices: " << numDevices << std::endl;
 
-    const PaDeviceInfo* deviceInfo = nullptr;
     for (int i = 0; i < numDevices; ++i)
     {
-        deviceInfo = Pa_GetDeviceInfo(i);
-        /* #TODO print info about device */
+        const PaDeviceInfo* deviceInfo = Pa_GetDeviceInfo(i);
+        std::cout << "Name: " << deviceInfo->name << std::endl;
+        std::cout << "Sample rate: " << deviceInfo->defaultSampleRate << std::endl;
+        std::cout << "Low input latency: " << deviceInfo->defaultLowInputLatency << std::endl;
+        std::cout << "---------"  << std::endl;
     }
 
-    // Creates stream
+    // Configures stream
+    constexpr int deviceIdx = 0;
 
-    const int deviceIdx = 0;
-
+    std::cout << "Input stream configuration..." << std::endl;
     PaStreamParameters inStreamParams;
     memset(&inStreamParams, 0, sizeof(inStreamParams));
     inStreamParams.channelCount = 2;
@@ -92,23 +85,23 @@ int main()
     inStreamParams.sampleFormat = paFloat32;
     inStreamParams.suggestedLatency = Pa_GetDeviceInfo(deviceIdx)->defaultLowInputLatency;
 
-    PaStreamParameters outStreamParams;
-    memset(&outStreamParams, 0, sizeof(outStreamParams));
-    outStreamParams.channelCount = 2;
-    outStreamParams.device = deviceIdx;
-    outStreamParams.hostApiSpecificStreamInfo = nullptr;
-    outStreamParams.sampleFormat = paFloat32;
-    outStreamParams.suggestedLatency = Pa_GetDeviceInfo(deviceIdx)->defaultLowInputLatency;
-
+    // Open stream
     PaStream* stream;
-    error = Pa_OpenStream(&stream, &inStreamParams, &outStreamParams, 44100, 512, paNoFlag, paCallback, nullptr);
+    error = Pa_OpenStream(&stream, &inStreamParams, nullptr, 44100.0, 512, paNoFlag, paCallback, nullptr);
     checkError(error);
 
+    std::cout << "Start streaming..." << std::endl;
     error = Pa_StartStream(stream);
     checkError(error);
 
-    Pa_Sleep(10 * 1000);
+    // Make the application continue execution until stopping with Ctrl-C
+    // #TODO add ctrlC capture for proper streaming closing
+    while (true)
+    {
+        Pa_Sleep(1);
+    }
 
+    // Close stream
     error = Pa_StopStream(stream);
     checkError(error);
 
