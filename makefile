@@ -6,10 +6,10 @@
 BuildPath =  build
 ExecutableName = avil
 
-LibraryFlags = -I./lib/portaudio/include ./lib/portaudio/lib/.libs/libportaudio.a -lrt -lasound -ljack -pthread
+LibraryFlags = -I./lib/portaudio/include ./lib/portaudio/lib/.libs/libportaudio.a -framework CoreAudio -framework AudioToolbox -framework CoreServices -pthread
 
 $(BuildPath)/$(ExecutableName): src/main.cpp
-	gcc -o $@ $^ $(LibraryFlags)
+	g++ -o $@ $^ $(LibraryFlags)
 
 install_dependencies:
 	mkdir -p lib 
