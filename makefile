@@ -9,7 +9,7 @@ ExecutableName = avil
 LibraryFlags = -I./lib/portaudio/include ./lib/portaudio/lib/.libs/libportaudio.a -framework CoreAudio -framework AudioToolbox -framework CoreServices -pthread
 
 $(BuildPath)/$(ExecutableName): src/main.cpp
-	g++ -o $@ $^ $(LibraryFlags)
+	g++ -o $@ $^ $(LibraryFlags) --std=c++20
 
 install_dependencies:
 	mkdir -p lib 
