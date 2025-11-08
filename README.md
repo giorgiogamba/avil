@@ -7,6 +7,9 @@ its spectrum on the screen for MacOS.
 
 We will use standard C++ 20.
 
+## Current status
+The program shows inside the terminal the volume graph and the frequency graph of the audio captured by the built-in mic:
+
 ## How to run
 In order to rubn this program you simply have to run `make build/avil` on your terminal, having the g++ compiler installed.
 Once compiled, you can run the application by typing `./build/avil`.
