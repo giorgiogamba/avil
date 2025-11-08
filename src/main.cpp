@@ -5,6 +5,27 @@
 #include <cmath>
 
 #include <portaudio.h>
+#include <fftw3.h>
+
+constexpr double SAMPLE_RATE{44100.0};
+constexpr int FRAMES_PER_BUFFER{512};
+constexpr int NUM_CHANNELS{2};
+
+constexpr int DISPLAY_SIZE{50};
+
+// Defines spectrogram's boundaries
+constexpr int SPECTROGRAM_FREQ_START{20};
+constexpr int SPECTROGRAM_FREQ_END{20 * 1000};
+
+struct StreamCallbackData
+{
+	double* in;
+	double* out;
+	fftw_plan p;
+	int startIndex;
+	int sprectrogramSize;
+};
+static StreamCallbackData* spectrogramData;
 
 void checkError(const PaError& error)
 {
@@ -15,23 +36,14 @@ void checkError(const PaError& error)
     }
 }
 
-/* Performs the action following the streaming capture */
-int paCallback ( const void* inputBuffer
-                , void* outputBuffer
-                , unsigned long framesPerBuffer
-                , const PaStreamCallbackTimeInfo* timeInfo
-                , PaStreamCallbackFlags statusFlags
-                , void* userData )
+void printVolumeGraph(const float* in, unsigned long framesPerBuffer)
 {
-    const float* in = (float*) inputBuffer;
-    (void) outputBuffer;
-
-    constexpr int displaySize = 50;
     std::cout << "\r";
 
     // Gets greatest volume in the buffer for L and R channels
     float volume_L = 0;
     float volume_R = 0;
+    
     // Parse over elements considering them in couples L, R
     for (unsigned long i = 0; i < framesPerBuffer * 2; i += 2)
     {
@@ -40,13 +52,83 @@ int paCallback ( const void* inputBuffer
     }
 
     // Prints resulting volume bars
-    for (int i = 0; i < displaySize; ++i)
+    for (int i = 0; i < DISPLAY_SIZE; ++i)
     {
-        const float bar = i / (float) displaySize;
+        const float bar = i / static_cast<float>(DISPLAY_SIZE);
         const std::string volumeBar = (bar <= volume_L && bar <= volume_R) ? "|" : " ";
         std::cout << volumeBar;
     }
+}
 
+void printFrequencyGraph(const float* in, unsigned long framesPerBuffer, void* userData)
+{
+    StreamCallbackData* streamData = reinterpret_cast<StreamCallbackData*>(userData);
+
+    // Collects data for Fourier transform display
+    for (auto i{0}; i < framesPerBuffer; ++i)
+    {
+        // Audio channels samples are set in a matrix where row i contains i-th samples form all the audio channels
+        // We own just 2 channels, so we get the even samples
+        streamData->in[i] = in[i * NUM_CHANNELS];
+    }
+
+    // Executes fourier transform on the stremed data
+    fftw_execute(streamData->p);
+
+    for (int i{0}; i < DISPLAY_SIZE; ++i)
+    {
+        const double step = i / static_cast<double>(DISPLAY_SIZE);
+        const auto outIndex = static_cast<int>(streamData->startIndex + step * streamData->sprectrogramSize);
+        const auto freq = streamData->out[outIndex];
+
+        if (freq < 0.125)
+        {
+            printf("▁");
+        }
+        else if (freq < 0.25)
+        {
+            printf("▂");
+        }
+        else if (freq < 0.375)
+        {
+            printf("▃");
+        }
+        else if (freq < 0.5)
+        {
+            printf("▄");
+        }
+        else if (freq < 0.625)
+        {
+            printf("▅");
+        }
+        else if (freq < 0.75)
+        {
+            printf("▆");
+        }
+        else if (freq < 0.925)
+        {
+            printf("▇");
+        }
+        else
+        {
+            printf("█");
+        }
+    }
+}
+
+/* Performs the action following the streaming capture */
+int streamCallback ( const void* inputBuffer
+                , void* outputBuffer
+                , unsigned long framesPerBuffer
+                , const PaStreamCallbackTimeInfo* timeInfo
+                , PaStreamCallbackFlags statusFlags
+                , void* userData )
+{
+    const float* in = (float*) inputBuffer; // #TODO move to static cast
+    (void) outputBuffer;
+
+    printVolumeGraph(in, framesPerBuffer);
+    printFrequencyGraph(in, framesPerBuffer, userData);
     fflush(stdout);
 
     return 0;
@@ -60,6 +142,24 @@ int main()
 
     error = Pa_Initialize();
     checkError(error);
+
+	spectrogramData = (StreamCallbackData*)malloc(sizeof(StreamCallbackData));
+	spectrogramData->in = (double*)malloc(FRAMES_PER_BUFFER * sizeof(double));
+	spectrogramData->out = (double*)malloc(FRAMES_PER_BUFFER * sizeof(double));
+
+	if (spectrogramData->in == nullptr || spectrogramData->out == nullptr)
+    {
+        std::cout << "Could not allocate spectrogram data\n";
+        exit(EXIT_FAILURE);
+    }
+
+    const double sampleRatio = FRAMES_PER_BUFFER / static_cast<double>(SAMPLE_RATE);
+    spectrogramData->startIndex = std::ceil(sampleRatio * SPECTROGRAM_FREQ_START); // rounds to biggernumber for very small numbers
+    constexpr double DEF_SIZE{FRAMES_PER_BUFFER / 2.0};
+    spectrogramData->sprectrogramSize = std::min(std::ceil(sampleRatio * SPECTROGRAM_FREQ_END), DEF_SIZE) - spectrogramData->startIndex;
+
+    // Defines the Fourier transform. Data need to remain the same as long as this profile is chosen
+    spectrogramData->p = fftw_plan_r2r_1d(FRAMES_PER_BUFFER, spectrogramData->in, spectrogramData->out, FFTW_R2HC, FFTW_ESTIMATE);
 
     const int numDevices = Pa_GetDeviceCount();
     std::cout << "Number of devices: " << numDevices << std::endl;
@@ -79,7 +179,7 @@ int main()
     std::cout << "Input stream configuration..." << std::endl;
     PaStreamParameters inStreamParams;
     memset(&inStreamParams, 0, sizeof(inStreamParams));
-    inStreamParams.channelCount = 2;
+    inStreamParams.channelCount = NUM_CHANNELS;
     inStreamParams.device = deviceIdx;
     inStreamParams.hostApiSpecificStreamInfo = nullptr;
     inStreamParams.sampleFormat = paFloat32;
@@ -87,7 +187,7 @@ int main()
 
     // Open stream
     PaStream* stream;
-    error = Pa_OpenStream(&stream, &inStreamParams, nullptr, 44100.0, 512, paNoFlag, paCallback, nullptr);
+    error = Pa_OpenStream(&stream, &inStreamParams, nullptr, 44100.0, 512, paNoFlag, streamCallback, spectrogramData);
     checkError(error);
 
     std::cout << "Start streaming..." << std::endl;
@@ -110,6 +210,12 @@ int main()
 
     error = Pa_Terminate();
     checkError(error);
+
+    // Releases memory for fourier transform
+    fftw_destroy_plan(spectrogramData->p);
+    fftw_free(spectrogramData->in);
+    fftw_free(spectrogramData->out);
+    fftw_free(spectrogramData);
 
     return EXIT_SUCCESS;
 }
