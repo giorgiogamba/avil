@@ -4,50 +4,11 @@
 #include <iostream>
 #include <cmath>
 
-#include <portaudio.h>
-#include <fftw3.h>
-#include <sndfile.h>
+#include "types.h"
+#include "constants.h"
 
-#pragma region CONSTANTS
-
-constexpr double SAMPLE_RATE{44100.0};
-constexpr int FRAMES_PER_BUFFER{512};
-constexpr int NUM_CHANNELS{2};
-
-constexpr int DISPLAY_SIZE{50};
-
-// Defines spectrogram's boundaries
-constexpr int SPECTROGRAM_FREQ_START{20};
-constexpr int SPECTROGRAM_FREQ_END{20 * 1000};
-
-#pragma endregion
-
-#pragma region Typed
-
-struct StreamCallbackData
-{
-	double* in;
-	double* out;
-	fftw_plan p;
-	int startIndex;
-	int sprectrogramSize;
-};
 static StreamCallbackData* spectrogramData;
-
-// Represents the loaded
-struct FileCallbackData
-{
-    SNDFILE* file;
-    SF_INFO info;
-    	double* in;
-	double* out;
-	fftw_plan p;
-	int startIndex;
-	int sprectrogramSize;
-};
 static FileCallbackData* fileSpectrogramData;
-
-#pragma endregion
 
 void checkError(const PaError& error)
 {
@@ -185,8 +146,7 @@ int main(int argc, const char* argv[])
         return EXIT_FAILURE;
     }
 
-    // Every time a Pa operation is performed, its value is checked in order
-    // to spot problems
+    // Every time a Pa operation is performed, its value is checked to spot problems
     PaError error;
 
     error = Pa_Initialize();
