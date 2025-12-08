@@ -39,7 +39,13 @@ struct FileCallbackData
 {
     SNDFILE* file;
     SF_INFO info;
+    	double* in;
+	double* out;
+	fftw_plan p;
+	int startIndex;
+	int sprectrogramSize;
 };
+static FileCallbackData* fileSpectrogramData;
 
 #pragma endregion
 
@@ -140,33 +146,23 @@ int streamCallback ( const void* inputBuffer
                 , PaStreamCallbackFlags statusFlags
                 , void* userData )
 {
-    // const float* in = (float*) inputBuffer; // #TODO move to static cast
-    // (void) outputBuffer;
-
-    // printVolumeGraph(in, framesPerBuffer);
-    // printFrequencyGraph(in, framesPerBuffer, userData);
-    // fflush(stdout);
-
+    (void) outputBuffer;
     float* out = nullptr;
-    FileCallbackData* data = (FileCallbackData*)userData;
-    sf_count_t numRead;
-
     out = (float*) outputBuffer;
-    
-    // Cleans output buffer
+    FileCallbackData* data = (FileCallbackData*)userData;
     memset(out, 0, sizeof(float) * framesPerBuffer * data->info.channels);
 
     // Transposes read data into the output buffer
+    sf_count_t numRead;
     numRead = sf_read_float(data->file, out, framesPerBuffer * data->info.channels);
 
-    // Unable to read the chunk completely, the file is ended
-    if (numRead < framesPerBuffer)
-    {
-        return paComplete;
-    }
+    printVolumeGraph(out, framesPerBuffer);
+    // const float* in = (float*) inputBuffer; // #TODO move to static cast
+    // printFrequencyGraph(in, framesPerBuffer, userData);
+    fflush(stdout);
 
-    //return 0;
-    return paContinue;
+    const bool fileEnded = numRead < framesPerBuffer;
+    return fileEnded ? paComplete : paContinue;
 }
 
 int main(int argc, const char* argv[])
