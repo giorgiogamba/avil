@@ -9,16 +9,17 @@ ExecutableName = avil
 LibraryFlags = -I ./lib/portaudio/include\
 				  ./lib/portaudio/lib/.libs/libportaudio.a -framework CoreAudio\
 				  -framework AudioToolbox -framework CoreServices -pthread\
-				  -I ./lib/fftw-3.3.10/api -lfftw3
+				  -I ./lib/fftw-3.3.10/api -lfftw3\
+				  -I ./lib/libsndfile-1.2.2/include -lm -L ./lib/libsndfile-1.2.2/src/.libs -lsndfile
 
 $(BuildPath)/$(ExecutableName): src/main.cpp
 	g++ -o $@ $^ $(LibraryFlags) --std=c++20
 
 # By setting this command, all the targets will be executed consequently
-install_dependencies: install_portaudio install_fftw
+install_dependencies: install_portaudio install_fftw install_libsndfile
 .PHONY: install_dependencies
 
-uninstall_dependencies: uninstall_portaudio uninstall_fftw
+uninstall_dependencies: uninstall_portaudio uninstall_fftw uninstall_libsndfile
 .PHONY: uninstall_dependencies
 
 install_portaudio:
@@ -42,6 +43,17 @@ uninstall_fftw:
 	cd lib/fftw-3.3.10 && $(MAKE) uninstall
 	rm -rf lib/fftw-3.3.10
 .PHONY: uninstall_fftw
+
+install_libsndfile:
+	mkdir -p lib
+	curl -L https://github.com/libsndfile/libsndfile/releases/download/1.2.2/libsndfile-1.2.2.tar.xz | tar -zx -C lib
+	cd lib/libsndfile-1.2.2 && ./configure && $(MAKE)
+.PHONY: install_libsndfile
+
+uninstall_libsndfile:
+	cd lib/libsndfile-1.2.2 && $(MAKE) uninstall
+	rm -rf lib/libsndfile-1.2.2
+.PHONY: uninstall_libsndfile
 
 clean:
 	rm -f $(BuildPath)/$(ExecutableName)
