@@ -43,6 +43,20 @@ void printVolumeGraph(const float* in, unsigned long framesPerBuffer)
     }
 }
 
+double getMagnitude(double* fftOutput, const int bin, const int size)
+{
+        // Works on the R2HC format, where imaginary part for N is at length-N
+        if (bin == 0)
+            return fftOutput[0] * fftOutput[0];
+
+        if (bin == size && size % 2 == 0)
+            return fftOutput[bin] * fftOutput[bin];
+
+        const double real = fftOutput[bin];
+        const double imag = fftOutput[size - bin];
+        return (real * real + imag * imag);
+}
+
 void printFileFrequencyGraph(const float* in, unsigned long framesPerBuffer, void* userData)
 {
     FileCallbackData* streamData = reinterpret_cast<FileCallbackData*>(userData);
@@ -61,41 +75,17 @@ void printFileFrequencyGraph(const float* in, unsigned long framesPerBuffer, voi
     for (int i{0}; i < DISPLAY_SIZE; ++i)
     {
         const double step = i / static_cast<double>(DISPLAY_SIZE);
-        const auto outIndex = static_cast<int>(streamData->startIndex + step * streamData->sprectrogramSize);
-        const auto freq = streamData->out[outIndex];
+        const auto binIdx = static_cast<int>(streamData->startIndex + step * streamData->sprectrogramSize);
+        const auto mag = getMagnitude(streamData->out, binIdx, FRAMES_PER_BUFFER);
 
-        if (freq < 0.125)
-        {
-            printf("▁");
-        }
-        else if (freq < 0.25)
-        {
-            printf("▂");
-        }
-        else if (freq < 0.375)
-        {
-            printf("▃");
-        }
-        else if (freq < 0.5)
-        {
-            printf("▄");
-        }
-        else if (freq < 0.625)
-        {
-            printf("▅");
-        }
-        else if (freq < 0.75)
-        {
-            printf("▆");
-        }
-        else if (freq < 0.925)
-        {
-            printf("▇");
-        }
-        else
-        {
-            printf("█");
-        }
+        if (mag < 0.125)        printf("▁");
+        else if (mag < 0.25)    printf("▂");
+        else if (mag < 0.375)   printf("▃");
+        else if (mag< 0.5)      printf("▄");
+        else if (mag < 0.625)   printf("▅");
+        else if (mag < 0.75)    printf("▆");
+        else if (mag < 0.925)   printf("▇");
+        else                    printf("█");
     }
 }
 
@@ -176,31 +166,17 @@ bool detectFrequencyCutoff(double* fftOutput, int fftSize, int sampleRate)
     // Supposed the frequency spectrum is divided in bins, gets the bin were the cutoff frequency appears
     int cutoffBin = static_cast<int>((cutoffFreq * fftSize) / sampleRate);
 
-    const auto getMagnitude = [&](const int bin)
-    {
-        // Works on the R2HC format, where imaginary part for N is at length-N
-        if (bin == 0)
-            return fftOutput[0] * fftOutput[0];
-
-        if (bin == halfSize && fftSize % 2 == 0)
-            return fftOutput[halfSize] * fftOutput[halfSize];
-
-        const double real = fftOutput[bin];
-        const double imag = fftOutput[fftSize - bin];
-        return (real * real + imag * imag);
-    };
-
     double highFreqEnergy = 0.0;
     for (int i = cutoffBin; i < halfSize; ++i)
     {
-        highFreqEnergy += getMagnitude(i);
+        highFreqEnergy += getMagnitude(fftOutput, i, fftSize);
     }
 
     double midFreqEnergy = 0.0;
     int midStart = static_cast<int>((10000.0 * fftSize) / sampleRate);
     for (int i = midStart; i <= (cutoffBin - 1); ++i)
     {
-        midFreqEnergy += getMagnitude(i);
+        midFreqEnergy += getMagnitude(fftOutput, i, fftSize);
     }
 
     // The frame is too silent
