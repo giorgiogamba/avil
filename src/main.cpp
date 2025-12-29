@@ -43,62 +43,6 @@ void printVolumeGraph(const float* in, unsigned long framesPerBuffer)
     }
 }
 
-void printFrequencyGraph(const float* in, unsigned long framesPerBuffer, void* userData)
-{
-    StreamCallbackData* streamData = reinterpret_cast<StreamCallbackData*>(userData);
-
-    // Collects data for Fourier transform display
-    for (auto i{0}; i < framesPerBuffer; ++i)
-    {
-        // Audio channels samples are set in a matrix where row i contains i-th samples form all the audio channels
-        // We own just 2 channels, so we get the even samples
-        streamData->in[i] = in[i * NUM_CHANNELS];
-    }
-
-    // Executes fourier transform on the stremed data
-    fftw_execute(streamData->p);
-
-    for (int i{0}; i < DISPLAY_SIZE; ++i)
-    {
-        const double step = i / static_cast<double>(DISPLAY_SIZE);
-        const auto outIndex = static_cast<int>(streamData->startIndex + step * streamData->sprectrogramSize);
-        const auto freq = streamData->out[outIndex];
-
-        if (freq < 0.125)
-        {
-            printf("▁");
-        }
-        else if (freq < 0.25)
-        {
-            printf("▂");
-        }
-        else if (freq < 0.375)
-        {
-            printf("▃");
-        }
-        else if (freq < 0.5)
-        {
-            printf("▄");
-        }
-        else if (freq < 0.625)
-        {
-            printf("▅");
-        }
-        else if (freq < 0.75)
-        {
-            printf("▆");
-        }
-        else if (freq < 0.925)
-        {
-            printf("▇");
-        }
-        else
-        {
-            printf("█");
-        }
-    }
-}
-
 void printFileFrequencyGraph(const float* in, unsigned long framesPerBuffer, void* userData)
 {
     FileCallbackData* streamData = reinterpret_cast<FileCallbackData*>(userData);
