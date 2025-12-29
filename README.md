@@ -8,7 +8,9 @@ its spectrum on the screen for MacOS.
 We will use standard C++ 20.
 
 ## Current status
-The program shows inside the terminal the volume graph and the frequency graph of the audio captured by the built-in mic:
+Main features:
+1. Real mp3 detection: the program can check if a passed input file is a real mp3 file converted in a wav format. This allows us to verify if a downloaded file has been corrupted. Ideal for club tracks check :D
+2. CmdLine spectrogram and volume graph
 
 ## How to run
 In order to rubn this program you simply have to run `make build/avil` on your terminal, having the g++ compiler installed.
