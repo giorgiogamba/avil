@@ -7,7 +7,7 @@
 #include "types.h"
 #include "constants.h"
 
-//static StreamCallbackData* spectrogramData;
+static StreamCallbackData* spectrogramData;
 static FileCallbackData* fileSpectrogramData;
 
 void checkError(const PaError& error)
@@ -90,7 +90,7 @@ void printFileFrequencyGraph(const float* in, unsigned long framesPerBuffer, voi
 }
 
 /* Performs the action following the streaming capture */
-int streamCallback ( const void* inputBuffer
+int fileStreamCallback ( const void* inputBuffer
                 , void* outputBuffer
                 , unsigned long framesPerBuffer
                 , const PaStreamCallbackTimeInfo* timeInfo
@@ -114,19 +114,53 @@ int streamCallback ( const void* inputBuffer
     return fileEnded ? paComplete : paContinue;
 }
 
+/* Performs the action following the streaming capture */
+int microphoneStreamCallback ( const void* inputBuffer
+                , void* outputBuffer
+                , unsigned long framesPerBuffer
+                , const PaStreamCallbackTimeInfo* timeInfo
+                , PaStreamCallbackFlags statusFlags
+                , void* userData )
+{
+    if (!inputBuffer)
+        return paContinue;
+
+    const float* input = (float*) inputBuffer;
+    float* output = (float*) outputBuffer;
+
+    for (unsigned long i = 0; i < framesPerBuffer * NUM_CHANNELS; i++)
+    {
+        output[i] = input[i];
+    }
+
+    // #TODO refactor for file frequency callback
+
+    printVolumeGraph(input, framesPerBuffer);
+    //printFileFrequencyGraph(output, framesPerBuffer, data);
+    fflush(stdout);
+
+    return paContinue;
+}
+
 void listAvailableDevices()
 {
+    std::cout << "===========================" << std::endl;
+    std::cout << "AVAILABLE DEVICES" << std::endl;
     const int numDevices = Pa_GetDeviceCount();
     std::cout << "Number of devices: " << numDevices << std::endl;
 
+    std::cout << "---------" << std::endl;
     for (int i = 0; i < numDevices; ++i)
     {
         const PaDeviceInfo* deviceInfo = Pa_GetDeviceInfo(i);
         std::cout << "Name: " << deviceInfo->name << std::endl;
+        std::cout << "INDEX: " << i << std::endl;
         std::cout << "Sample rate: " << deviceInfo->defaultSampleRate << std::endl;
         std::cout << "Low input latency: " << deviceInfo->defaultLowInputLatency << std::endl;
-        std::cout << "---------"  << std::endl;
+        std::cout << "---------" << std::endl;
     }
+
+    std::cout << "===========================" << std::endl;
 }
 
 void releaseResources(FileCallbackData* fileSpectrogramData)
@@ -252,23 +286,15 @@ bool isProbablyMP3(SNDFILE* file, const SF_INFO& info, FileCallbackData* data)
 
 int main(int argc, const char* argv[])
 {
-    // Reads cli arguments
-    if (argc < 2)
-    {
-        std::cout << "Error while initializing application. Not enough arguments provided\n";
-        return EXIT_FAILURE;
-    }
+    // The application provides two different features:
+    // Microphone audio capturing and fake High Resolution audio files recognition
+    // 1. If no arguments are provided, audio capturing is performed,
+    // 2. If a audio file path is provided, audio recognition is performed.
+    //      2.1. If the file is original, the file is reproduced
+    // Both features, when reproducing something, show a cmdline spectrum analyzer and amplitude meter
 
-    const char* filePath = argv[1];
-    
-    FileCallbackData data{};
-    data.file = sf_open(filePath, SFM_READ, &data.info);
-    if (sf_error(data.file) != SF_ERR_NO_ERROR)
-    {
-        std::cout << "An error occured while opening file " << filePath << "\n";
-        std::cout << sf_strerror(data.file) << "\n";
-        return EXIT_FAILURE;
-    }
+    std::cout << "=== AVIL ===" << std::endl;
+    std::cout << "Press Ctrl+C to stop the application" << std::endl;
 
     // Every time a Pa operation is performed, its value is checked to spot problems
     PaError error;
@@ -276,83 +302,117 @@ int main(int argc, const char* argv[])
     error = Pa_Initialize();
     checkError(error);
 
-    fileSpectrogramData = (FileCallbackData*)malloc(sizeof(FileCallbackData));
-	fileSpectrogramData->in = (double*)fftw_malloc(FRAMES_PER_BUFFER * sizeof(double));
-	fileSpectrogramData->out = (double*)fftw_malloc(FRAMES_PER_BUFFER * sizeof(double));
-
-	if (!fileSpectrogramData->in || !fileSpectrogramData->out)
+    // Reads cli arguments
+    if (argc == 1)
     {
-        std::cout << "Could not allocate spectrogram data\n";
-        exit(EXIT_FAILURE);
+        std::cout << "No arguments provided, starting microphone audio playback\n";
+
+        constexpr int deviceIdx = 1;
+
+        listAvailableDevices();
+
+        std::cout << "Input stream configuration ..." << std::endl;
+        PaStreamParameters inStreamParams;
+        memset(&inStreamParams, 0, sizeof(inStreamParams));
+        inStreamParams.channelCount = NUM_CHANNELS;
+        inStreamParams.device = deviceIdx;
+        inStreamParams.hostApiSpecificStreamInfo = nullptr;
+        inStreamParams.sampleFormat = paFloat32;
+        inStreamParams.suggestedLatency = Pa_GetDeviceInfo(deviceIdx)->defaultLowInputLatency;
+
+        PaStreamParameters outParams;
+        outParams.device = Pa_GetDefaultOutputDevice();
+        outParams.channelCount = NUM_CHANNELS;
+        outParams.sampleFormat = paFloat32;
+        outParams.suggestedLatency = Pa_GetDeviceInfo(Pa_GetDefaultOutputDevice())->defaultLowInputLatency;
+        outParams.hostApiSpecificStreamInfo = nullptr;
+
+        std::cout << "Opening stream ..." << std::endl;
+        PaStream* stream;
+        error = Pa_OpenStream(&stream, &inStreamParams, &outParams, 44100.0, 512, paNoFlag, microphoneStreamCallback, spectrogramData);
+        checkError(error);
+
+        std::cout << "Starting stream ..." << std::endl;
+        error = Pa_StartStream(stream);
+        checkError(error);
+
+        while (true)
+        {
+            Pa_Sleep(1);
+        }
+
+        // #TODO add resource release
     }
-
-    constexpr double sampleRatio = FRAMES_PER_BUFFER / static_cast<double>(SAMPLE_RATE);
-    fileSpectrogramData->startIndex = std::ceil(sampleRatio * SPECTROGRAM_FREQ_START);
-    constexpr double DEF_SIZE{FRAMES_PER_BUFFER / 2.0};
-    fileSpectrogramData->sprectrogramSize = std::min(std::ceil(sampleRatio * SPECTROGRAM_FREQ_END), DEF_SIZE) - fileSpectrogramData->startIndex;
-
-    // Defines the Fourier transform. Data need to remain the same as long as this profile is chosen
-    fileSpectrogramData->p = fftw_plan_r2r_1d(FRAMES_PER_BUFFER, fileSpectrogramData->in, fileSpectrogramData->out, FFTW_R2HC, FFTW_ESTIMATE);
-
-    PaStream* stream;
-    fileSpectrogramData->file = data.file;
-    fileSpectrogramData->info = data.info;
-    error = Pa_OpenDefaultStream(&stream, 0, data.info.channels, paFloat32, data.info.samplerate, FRAMES_PER_BUFFER, streamCallback, fileSpectrogramData);
-    checkError(error);
-
-    if (isProbablyMP3(fileSpectrogramData->file, fileSpectrogramData->info, fileSpectrogramData))
+    else if (argc == 2)
     {
-        std::cout << "WARNING\n";
-        Pa_CloseStream(stream);
-        Pa_Terminate();
-        sf_close(data.file);
-        releaseResources(fileSpectrogramData);
+        std::cout << "One argument provided, analyzing and reproducing the file at the provided path\n";
+        // #TODO add procedure
+
+        const char* filePath = argv[1];
+    
+        FileCallbackData data{};
+        data.file = sf_open(filePath, SFM_READ, &data.info);
+        if (sf_error(data.file) != SF_ERR_NO_ERROR)
+        {
+            std::cout << "[AVIL ERROR] An error occured while opening file " << filePath << ". ("<< sf_strerror(data.file) <<")\n";
+            return EXIT_FAILURE;
+        }
+
+        fileSpectrogramData = (FileCallbackData*)malloc(sizeof(FileCallbackData));
+        fileSpectrogramData->in = (double*)fftw_malloc(FRAMES_PER_BUFFER * sizeof(double));
+        fileSpectrogramData->out = (double*)fftw_malloc(FRAMES_PER_BUFFER * sizeof(double));
+
+        if (!fileSpectrogramData->in || !fileSpectrogramData->out)
+        {
+            std::cout << "[AVIL ERROR] Could not allocate spectrogram data\n";
+            exit(EXIT_FAILURE);
+        }
+
+        constexpr double sampleRatio = FRAMES_PER_BUFFER / static_cast<double>(SAMPLE_RATE);
+        fileSpectrogramData->startIndex = std::ceil(sampleRatio * SPECTROGRAM_FREQ_START);
+        constexpr double DEF_SIZE{FRAMES_PER_BUFFER / 2.0};
+        fileSpectrogramData->sprectrogramSize = std::min(std::ceil(sampleRatio * SPECTROGRAM_FREQ_END), DEF_SIZE) - fileSpectrogramData->startIndex;
+
+        // Defines the Fourier transform. Data need to remain the same as long as this profile is chosen
+        fileSpectrogramData->p = fftw_plan_r2r_1d(FRAMES_PER_BUFFER, fileSpectrogramData->in, fileSpectrogramData->out, FFTW_R2HC, FFTW_ESTIMATE);
+
+        PaStream* stream;
+        fileSpectrogramData->file = data.file;
+        fileSpectrogramData->info = data.info;
+        error = Pa_OpenDefaultStream(&stream, 0, data.info.channels, paFloat32, data.info.samplerate, FRAMES_PER_BUFFER, fileStreamCallback, fileSpectrogramData);
+        checkError(error);
+
+        if (isProbablyMP3(fileSpectrogramData->file, fileSpectrogramData->info, fileSpectrogramData))
+        {
+            std::cout << "WARNING. The file is probably a mp3 file converted to wav file\n";
+            Pa_CloseStream(stream);
+            Pa_Terminate();
+            sf_close(data.file);
+            releaseResources(fileSpectrogramData);
+            return EXIT_FAILURE;
+        }
+
+        std::cout << "Starting stream, stop it with Ctrl+C...\n";
+        error = Pa_StartStream(stream);
+        checkError(error);
+
+        // Plays until the file continues
+        while (Pa_IsStreamActive(stream))
+        {
+            Pa_Sleep(100);
+        }
+
+        error = Pa_StopStream(stream);
+        checkError(error);
+
+        error = Pa_CloseStream(stream);
+        checkError(error);
+    }
+    else
+    {
+        std::cout << "[AVIL ERROR] Invalid arguments provided. Exiting...\n";
         return EXIT_FAILURE;
     }
-
-    std::cout << "Starting stream, stop it with Ctrl+C...\n";
-    error = Pa_StartStream(stream);
-    checkError(error);
-
-    // Plays until the file continues
-    while (Pa_IsStreamActive(stream))
-    {
-        Pa_Sleep(100);
-    }
-
-    // // Configures stream
-    // constexpr int deviceIdx = 0;
-
-    // std::cout << "Input stream configuration..." << std::endl;
-    // PaStreamParameters inStreamParams;
-    // memset(&inStreamParams, 0, sizeof(inStreamParams));
-    // inStreamParams.channelCount = NUM_CHANNELS;
-    // inStreamParams.device = deviceIdx;
-    // inStreamParams.hostApiSpecificStreamInfo = nullptr;
-    // inStreamParams.sampleFormat = paFloat32;
-    // inStreamParams.suggestedLatency = Pa_GetDeviceInfo(deviceIdx)->defaultLowInputLatency;
-
-    // // Open stream
-    // PaStream* stream;
-    // error = Pa_OpenStream(&stream, &inStreamParams, nullptr, 44100.0, 512, paNoFlag, streamCallback, spectrogramData);
-    // checkError(error);
-
-    // std::cout << "Start streaming..." << std::endl;
-    // error = Pa_StartStream(stream);
-    // checkError(error);
-
-    // // Make the application continue execution until stopping with Ctrl-C
-    // // #TODO add ctrlC capture for proper streaming closing
-    // while (true)
-    // {
-    //     Pa_Sleep(1);
-    // }
-
-    error = Pa_StopStream(stream);
-    checkError(error);
-
-    error = Pa_CloseStream(stream);
-    checkError(error);
 
     error = Pa_Terminate();
     checkError(error);
