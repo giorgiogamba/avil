@@ -21,7 +21,7 @@ void checkError(const PaError& error)
 
 void printVolumeGraph(const float* in, unsigned long framesPerBuffer)
 {
-    std::cout << "\r";
+    printf("\r");
 
     // Gets greatest volume in the buffer for L and R channels
     float volume_L = 0;
@@ -39,7 +39,7 @@ void printVolumeGraph(const float* in, unsigned long framesPerBuffer)
     {
         const float bar = i / static_cast<float>(DISPLAY_SIZE);
         const std::string volumeBar = (bar <= volume_L && bar <= volume_R) ? "|" : " ";
-        std::cout << volumeBar;
+        printf("%s", volumeBar.c_str());
     }
 }
 
@@ -78,7 +78,7 @@ void printFileFrequencyGraph(const float* in, unsigned long framesPerBuffer, voi
         const auto binIdx = static_cast<int>(streamData->startIndex + step * streamData->sprectrogramSize);
         const auto mag = getMagnitude(streamData->out, binIdx, FRAMES_PER_BUFFER);
 
-        if (mag < 0.125)        printf("▁");
+        if      (mag < 0.125)   printf("▁");
         else if (mag < 0.25)    printf("▂");
         else if (mag < 0.375)   printf("▃");
         else if (mag< 0.5)      printf("▄");
@@ -127,7 +127,7 @@ int microphoneStreamCallback ( const void* inputBuffer
 
     const float* input = (float*) inputBuffer;
     float* output = (float*) outputBuffer;
-
+    StreamCallbackData* data = (StreamCallbackData*)userData;
     for (unsigned long i = 0; i < framesPerBuffer * NUM_CHANNELS; i++)
     {
         output[i] = input[i];
@@ -136,7 +136,7 @@ int microphoneStreamCallback ( const void* inputBuffer
     // #TODO refactor for file frequency callback
 
     printVolumeGraph(input, framesPerBuffer);
-    //printFileFrequencyGraph(output, framesPerBuffer, data);
+    printFileFrequencyGraph(output, framesPerBuffer, data);
     fflush(stdout);
 
     return paContinue;
