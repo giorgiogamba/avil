@@ -16,11 +16,11 @@ struct StreamCallbackData
 // Represents the loaded
 struct FileCallbackData
 {
+    double* in;
+    double* out;
+    fftw_plan p;
+    int startIndex;
+    int sprectrogramSize;
     SNDFILE* file;
     SF_INFO info;
-    double* in;
-	double* out;
-	fftw_plan p;
-	int startIndex;
-	int sprectrogramSize;
 };

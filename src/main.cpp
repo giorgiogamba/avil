@@ -45,21 +45,21 @@ void printVolumeGraph(const float* in, unsigned long framesPerBuffer)
 
 double getMagnitude(double* fftOutput, const int bin, const int size)
 {
-        // Works on the R2HC format, where imaginary part for N is at length-N
-        if (bin == 0)
-            return fftOutput[0] * fftOutput[0];
+    // Works on the R2HC format, where imaginary part for N is at length-N
+    if (bin == 0)
+        return fftOutput[0] * fftOutput[0];
 
-        if (bin == size && size % 2 == 0)
-            return fftOutput[bin] * fftOutput[bin];
+    if (bin == size && size % 2 == 0)
+        return fftOutput[bin] * fftOutput[bin];
 
-        const double real = fftOutput[bin];
-        const double imag = fftOutput[size - bin];
-        return (real * real + imag * imag);
+    const double real = fftOutput[bin];
+    const double imag = fftOutput[size - bin];
+    return (real * real + imag * imag);
 }
 
 void printFileFrequencyGraph(const float* in, unsigned long framesPerBuffer, void* userData)
 {
-    FileCallbackData* streamData = reinterpret_cast<FileCallbackData*>(userData);
+    StreamCallbackData* streamData = reinterpret_cast<StreamCallbackData*>(userData);
 
     // Collects data for Fourier transform display
     for (auto i{0}; i < framesPerBuffer; ++i)
@@ -129,11 +129,7 @@ int microphoneStreamCallback ( const void* inputBuffer
     float* output = (float*) outputBuffer;
     StreamCallbackData* data = (StreamCallbackData*)userData;
     for (unsigned long i = 0; i < framesPerBuffer * NUM_CHANNELS; i++)
-    {
         output[i] = input[i];
-    }
-
-    // #TODO refactor for file frequency callback
 
     printVolumeGraph(input, framesPerBuffer);
     printFileFrequencyGraph(output, framesPerBuffer, data);
@@ -174,6 +170,17 @@ void releaseResources(FileCallbackData* fileSpectrogramData)
     fftw_free(fileSpectrogramData);
 }
 
+void releaseStreamResources(StreamCallbackData* streamSpectrogramData)
+{
+    if (!streamSpectrogramData)
+        return;
+
+    fftw_destroy_plan(streamSpectrogramData->p);
+    fftw_free(streamSpectrogramData->in);
+    fftw_free(streamSpectrogramData->out);
+    free(streamSpectrogramData);
+}
+
 // Applies Hann Window tecnique in order to avoid spectral leakage
 void applyHannWindow(double* input, int size)
 {
@@ -190,9 +197,7 @@ bool detectFrequencyCutoff(double* fftOutput, int fftSize, int sampleRate)
     constexpr double cutoffFreq = 16000.0;
     const double nyquist = sampleRate / 2.0;
     if (nyquist < cutoffFreq)
-    {
         return false;
-    }
 
     // Comparing over fftSize / 2 because using the FFT simmetry property
     const int halfSize = fftSize / 2;
@@ -202,16 +207,12 @@ bool detectFrequencyCutoff(double* fftOutput, int fftSize, int sampleRate)
 
     double highFreqEnergy = 0.0;
     for (int i = cutoffBin; i < halfSize; ++i)
-    {
         highFreqEnergy += getMagnitude(fftOutput, i, fftSize);
-    }
 
     double midFreqEnergy = 0.0;
     int midStart = static_cast<int>((10000.0 * fftSize) / sampleRate);
     for (int i = midStart; i <= (cutoffBin - 1); ++i)
-    {
         midFreqEnergy += getMagnitude(fftOutput, i, fftSize);
-    }
 
     // The frame is too silent
     constexpr double minEnergy = 1e-6;
@@ -247,9 +248,7 @@ bool isProbablyMP3(SNDFILE* file, const SF_INFO& info, FileCallbackData* data)
         {
             data->in[i] = 0.f;
             for (int c = 0; c < info.channels; ++c)
-            {
                 data->in[i] += buffer[i * info.channels + c];
-            }
 
             data->in[i] /= info.channels;
             sumSq += data->in[i] * data->in[i];
@@ -355,16 +354,11 @@ int main(int argc, const char* argv[])
         checkError(error);
 
         while (true)
-        {
             Pa_Sleep(1);
-        }
-
-        // #TODO add resource release
     }
     else if (argc == 2)
     {
         std::cout << "One argument provided, analyzing and reproducing the file at the provided path\n";
-        // #TODO add procedure
 
         const char* filePath = argv[1];
     
@@ -416,9 +410,7 @@ int main(int argc, const char* argv[])
 
         // Plays until the file continues
         while (Pa_IsStreamActive(stream))
-        {
             Pa_Sleep(100);
-        }
 
         error = Pa_StopStream(stream);
         checkError(error);
