@@ -327,6 +327,24 @@ int main(int argc, const char* argv[])
         outParams.suggestedLatency = Pa_GetDeviceInfo(Pa_GetDefaultOutputDevice())->defaultLowInputLatency;
         outParams.hostApiSpecificStreamInfo = nullptr;
 
+        spectrogramData = (StreamCallbackData*)malloc(sizeof(StreamCallbackData));
+        spectrogramData->in = (double*)fftw_malloc(FRAMES_PER_BUFFER * sizeof(double));
+        spectrogramData->out = (double*)fftw_malloc(FRAMES_PER_BUFFER * sizeof(double));
+
+        if (!spectrogramData->in || !spectrogramData->out)
+        {
+            std::cout << "[AVIL ERROR] Could not allocate spectrogram data\n";
+            exit(EXIT_FAILURE);
+        }
+
+        constexpr double sampleRatio = FRAMES_PER_BUFFER / static_cast<double>(SAMPLE_RATE);
+        spectrogramData->startIndex = std::ceil(sampleRatio * SPECTROGRAM_FREQ_START);
+        constexpr double DEF_SIZE{FRAMES_PER_BUFFER / 2.0};
+        spectrogramData->sprectrogramSize = std::min(std::ceil(sampleRatio * SPECTROGRAM_FREQ_END), DEF_SIZE) - spectrogramData->startIndex;
+
+        // Defines the Fourier transform. Data need to remain the same as long as this profile is chosen
+        spectrogramData->p = fftw_plan_r2r_1d(FRAMES_PER_BUFFER, spectrogramData->in, spectrogramData->out, FFTW_R2HC, FFTW_ESTIMATE);
+
         std::cout << "Opening stream ..." << std::endl;
         PaStream* stream;
         error = Pa_OpenStream(&stream, &inStreamParams, &outParams, 44100.0, 512, paNoFlag, microphoneStreamCallback, spectrogramData);
