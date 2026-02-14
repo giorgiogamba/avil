@@ -6,6 +6,11 @@
 
 #include "types.h"
 #include "constants.h"
+#include "fft.hpp"
+
+#include <iostream>
+#include <iomanip>
+#include <cmath>
 
 static StreamCallbackData* spectrogramData;
 static FileCallbackData* fileSpectrogramData;
@@ -128,11 +133,26 @@ int microphoneStreamCallback ( const void* inputBuffer
     const float* input = (float*) inputBuffer;
     float* output = (float*) outputBuffer;
     StreamCallbackData* data = (StreamCallbackData*)userData;
-    for (unsigned long i = 0; i < framesPerBuffer * NUM_CHANNELS; i++)
-        output[i] = input[i];
+
+    std::vector<std::complex<float>> signal(framesPerBuffer);
+    for (unsigned long i {0}; i < framesPerBuffer; ++i)
+        signal[i] = std::complex<float>(input[i * NUM_CHANNELS], 0.f); // use first channel
+
+    FFT_AVX2::fft(signal.data(), framesPerBuffer);
+    FFT_AVX2::suppressFeedback(signal.data(), framesPerBuffer, 0.3f);  // Complete suppression of peak frequency
+    FFT_AVX2::ifft(signal.data(), framesPerBuffer);
+
+    constexpr float GAIN_REDUCTION_FACTOR{0.1f};
+
+    for (unsigned long i{0}; i < framesPerBuffer; ++i)
+    {
+        float processedSample = signal[i].real();
+        for (int ch{0}; ch < NUM_CHANNELS; ++ch)
+            output[i * NUM_CHANNELS + ch] = processedSample * GAIN_REDUCTION_FACTOR;
+    }
 
     printVolumeGraph(input, framesPerBuffer);
-    printFileFrequencyGraph(output, framesPerBuffer, data);
+    printFileFrequencyGraph((float*)output, framesPerBuffer, data);
     fflush(stdout);
 
     return paContinue;
@@ -306,24 +326,45 @@ int main(int argc, const char* argv[])
     {
         std::cout << "No arguments provided, starting microphone audio playback\n";
 
-        constexpr int deviceIdx = 1;
-
         listAvailableDevices();
+
+        int deviceIdx = Pa_GetDefaultInputDevice();
+        if (deviceIdx == paNoDevice)
+        {
+            std::cout << "[PortAudio Error] No default input device found\n";
+            return EXIT_FAILURE;
+        }
+
+        std::cout << "Using device " << deviceIdx << "\n";
+        const PaDeviceInfo* deviceInfo = Pa_GetDeviceInfo(deviceIdx);
+        std::cout << "Device max input channels: " << deviceInfo->maxInputChannels << "\n";
+        std::cout << "Device max output channels: " << deviceInfo->maxOutputChannels << "\n";
+
+        // Use minimum of requested channels and device's max channels
+        int inputChannels = std::min(NUM_CHANNELS, deviceInfo->maxInputChannels);
+        if (inputChannels <= 0)
+        {
+            std::cout << "[PortAudio Error] Device has no input channels\n";
+            return EXIT_FAILURE;
+        }
 
         std::cout << "Input stream configuration ..." << std::endl;
         PaStreamParameters inStreamParams;
         memset(&inStreamParams, 0, sizeof(inStreamParams));
-        inStreamParams.channelCount = NUM_CHANNELS;
+        inStreamParams.channelCount = inputChannels;
         inStreamParams.device = deviceIdx;
         inStreamParams.hostApiSpecificStreamInfo = nullptr;
         inStreamParams.sampleFormat = paFloat32;
-        inStreamParams.suggestedLatency = Pa_GetDeviceInfo(deviceIdx)->defaultLowInputLatency;
+        inStreamParams.suggestedLatency = deviceInfo->defaultLowInputLatency;
 
         PaStreamParameters outParams;
-        outParams.device = Pa_GetDefaultOutputDevice();
-        outParams.channelCount = NUM_CHANNELS;
+        int outputDevice = Pa_GetDefaultOutputDevice();
+        outParams.device = outputDevice;
+        const PaDeviceInfo* outDeviceInfo = Pa_GetDeviceInfo(outputDevice);
+        int outputChannels = std::min(NUM_CHANNELS, outDeviceInfo->maxOutputChannels);
+        outParams.channelCount = outputChannels;
         outParams.sampleFormat = paFloat32;
-        outParams.suggestedLatency = Pa_GetDeviceInfo(Pa_GetDefaultOutputDevice())->defaultLowInputLatency;
+        outParams.suggestedLatency = outDeviceInfo->defaultLowOutputLatency;
         outParams.hostApiSpecificStreamInfo = nullptr;
 
         spectrogramData = (StreamCallbackData*)malloc(sizeof(StreamCallbackData));
@@ -367,6 +408,16 @@ int main(int argc, const char* argv[])
         if (sf_error(data.file) != SF_ERR_NO_ERROR)
         {
             std::cout << "[AVIL ERROR] An error occured while opening file " << filePath << ". ("<< sf_strerror(data.file) <<")\n";
+            return EXIT_FAILURE;
+        }
+
+        std::cout << "File opened successfully. Channels: " << data.info.channels << ", Sample rate: " << data.info.samplerate << "\n";
+
+        // Validate channel count
+        if (data.info.channels <= 0 || data.info.channels > 32)
+        {
+            std::cout << "[AVIL ERROR] Invalid channel count in file: " << data.info.channels << "\n";
+            sf_close(data.file);
             return EXIT_FAILURE;
         }
 

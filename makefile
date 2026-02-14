@@ -12,9 +12,9 @@ LibraryFlags = -I ./lib/portaudio/include\
 				  -I ./lib/fftw-3.3.10/api -lfftw3\
 				  -I ./lib/libsndfile-1.2.2/include -lm -L ./lib/libsndfile-1.2.2/src/.libs -lsndfile
 
-$(BuildPath)/$(ExecutableName): src/main.cpp
-	g++ -o $@ $^ $(LibraryFlags) --std=c++20
-
+$(BuildPath)/$(ExecutableName): src/main.cpp src/fft.hpp src/types.h src/constants.h
+	g++ -o $@ src/main.cpp $(LibraryFlags) --std=c++20 -mavx2 -mfma
+	
 # By setting this command, all the targets will be executed consequently
 install_dependencies: install_portaudio install_fftw install_libsndfile
 .PHONY: install_dependencies
