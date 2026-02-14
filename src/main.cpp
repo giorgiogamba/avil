@@ -6,6 +6,11 @@
 
 #include "types.h"
 #include "constants.h"
+#include "fft.hpp"
+
+#include <iostream>
+#include <iomanip>
+#include <cmath>
 
 static StreamCallbackData* spectrogramData;
 static FileCallbackData* fileSpectrogramData;
@@ -128,11 +133,26 @@ int microphoneStreamCallback ( const void* inputBuffer
     const float* input = (float*) inputBuffer;
     float* output = (float*) outputBuffer;
     StreamCallbackData* data = (StreamCallbackData*)userData;
-    for (unsigned long i = 0; i < framesPerBuffer * NUM_CHANNELS; i++)
-        output[i] = input[i];
+
+    std::vector<std::complex<float>> signal(framesPerBuffer);
+    for (unsigned long i {0}; i < framesPerBuffer; ++i)
+        signal[i] = std::complex<float>(input[i * NUM_CHANNELS], 0.f); // use first channel
+
+    FFT_AVX2::fft(signal.data(), framesPerBuffer);
+    FFT_AVX2::suppressFeedback(signal.data(), framesPerBuffer, 0.3f);  // Complete suppression of peak frequency
+    FFT_AVX2::ifft(signal.data(), framesPerBuffer);
+
+    constexpr float GAIN_REDUCTION_FACTOR{0.1f};
+
+    for (unsigned long i{0}; i < framesPerBuffer; ++i)
+    {
+        float processedSample = signal[i].real();
+        for (int ch{0}; ch < NUM_CHANNELS; ++ch)
+            output[i * NUM_CHANNELS + ch] = processedSample * GAIN_REDUCTION_FACTOR;
+    }
 
     printVolumeGraph(input, framesPerBuffer);
-    printFileFrequencyGraph(output, framesPerBuffer, data);
+    printFileFrequencyGraph((float*)output, framesPerBuffer, data);
     fflush(stdout);
 
     return paContinue;
