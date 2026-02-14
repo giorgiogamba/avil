@@ -15,6 +15,10 @@
 static StreamCallbackData* spectrogramData;
 static FileCallbackData* fileSpectrogramData;
 
+/**
+ * @brief Analyzes the passes error and eventually prints its content
+ * @param error The error to be analyzeds
+ */
 void checkError(const PaError& error)
 {
     if (error != paNoError)
@@ -24,6 +28,12 @@ void checkError(const PaError& error)
     }
 }
 
+/**
+ * @brief Prints a cmd-line volume graph representing the volume of the passed input
+ * 
+ * @param in Data to be displayed
+ * @param framesPerBuffer Number of frames to be analyzed from in buffer
+ */
 void printVolumeGraph(const float* in, unsigned long framesPerBuffer)
 {
     printf("\r");
@@ -48,6 +58,14 @@ void printVolumeGraph(const float* in, unsigned long framesPerBuffer)
     }
 }
 
+/**
+ * @brief Utility function to retrieve magnitude from the passed fft object at the passed bin
+ * 
+ * @param fftOutput object representing FFT signal
+ * @param bin index to be analuzed
+ * @param size Buffers length
+ * @return The magnitude of fftOutput of size size at the passed bin
+ */
 double getMagnitude(double* fftOutput, const int bin, const int size)
 {
     // Works on the R2HC format, where imaginary part for N is at length-N
@@ -62,6 +80,13 @@ double getMagnitude(double* fftOutput, const int bin, const int size)
     return (real * real + imag * imag);
 }
 
+/**
+ * @brief Prints a cmd-line frequency spectrum of the passed input
+ * 
+ * @param in input data
+ * @param framesPerBuffer length on input data in
+ * @param userData data to handle fft
+ */
 void printFileFrequencyGraph(const float* in, unsigned long framesPerBuffer, void* userData)
 {
     StreamCallbackData* streamData = reinterpret_cast<StreamCallbackData*>(userData);
@@ -94,13 +119,24 @@ void printFileFrequencyGraph(const float* in, unsigned long framesPerBuffer, voi
     }
 }
 
-/* Performs the action following the streaming capture */
-int fileStreamCallback ( const void* inputBuffer
-                , void* outputBuffer
-                , unsigned long framesPerBuffer
-                , const PaStreamCallbackTimeInfo* timeInfo
-                , PaStreamCallbackFlags statusFlags
-                , void* userData )
+/**
+ * @brief Callback function invoked once that an audio capture of a buffer is completed.
+ *        Used to execute data processing on the captured data before sending to the output buffer
+ * 
+ * @param inputBuffer audio data captured
+ * @param outputBuffer audio data transmitted to the output
+ * @param framesPerBuffer frames of input and output buffers
+ * @param timeInfo 
+ * @param statusFlags 
+ * @param userData 
+ * @return a code representing of the callback ended correctly
+ */
+int fileStreamCallback  ( const void* inputBuffer
+                        , void* outputBuffer
+                        , unsigned long framesPerBuffer
+                        , const PaStreamCallbackTimeInfo* timeInfo
+                        , PaStreamCallbackFlags statusFlags
+                        , void* userData )
 {
     (void) outputBuffer;
     float* out = nullptr;
@@ -119,13 +155,24 @@ int fileStreamCallback ( const void* inputBuffer
     return fileEnded ? paComplete : paContinue;
 }
 
-/* Performs the action following the streaming capture */
-int microphoneStreamCallback ( const void* inputBuffer
-                , void* outputBuffer
-                , unsigned long framesPerBuffer
-                , const PaStreamCallbackTimeInfo* timeInfo
-                , PaStreamCallbackFlags statusFlags
-                , void* userData )
+/**
+ * @brief Callback function invoked once that a microphone audio capture of a buffer is completed.
+ *        Used to execute data processing on the captured data before sending to the output buffer
+ * 
+ * @param inputBuffer audio data captured
+ * @param outputBuffer audio data transmitted to the output
+ * @param framesPerBuffer frames of input and output buffers
+ * @param timeInfo 
+ * @param statusFlags 
+ * @param userData 
+ * @return a code representing of the callback ended correctly
+ */
+int microphoneStreamCallback( const void* inputBuffer
+                            , void* outputBuffer
+                            , unsigned long framesPerBuffer
+                            , const PaStreamCallbackTimeInfo* timeInfo
+                            , PaStreamCallbackFlags statusFlags
+                            , void* userData )
 {
     if (!inputBuffer)
         return paContinue;
@@ -158,6 +205,9 @@ int microphoneStreamCallback ( const void* inputBuffer
     return paContinue;
 }
 
+/**
+ * @brief Displays available devices for the current device
+ */
 void listAvailableDevices()
 {
     std::cout << "===========================" << std::endl;
@@ -179,6 +229,11 @@ void listAvailableDevices()
     std::cout << "===========================" << std::endl;
 }
 
+/**
+ * @brief Frees resources for the passed spectrogram
+ * 
+ * @param fileSpectrogramData utility struct for file audio playback
+ */
 void releaseResources(FileCallbackData* fileSpectrogramData)
 {
     if (!fileSpectrogramData)
@@ -190,6 +245,11 @@ void releaseResources(FileCallbackData* fileSpectrogramData)
     fftw_free(fileSpectrogramData);
 }
 
+/**
+ * @brief Frees resources for the passed spectrogram
+ * 
+ * @param fileSpectrogramData utility struct for microphone audio playback
+ */
 void releaseStreamResources(StreamCallbackData* streamSpectrogramData)
 {
     if (!streamSpectrogramData)
@@ -201,7 +261,12 @@ void releaseStreamResources(StreamCallbackData* streamSpectrogramData)
     free(streamSpectrogramData);
 }
 
-// Applies Hann Window tecnique in order to avoid spectral leakage
+/**
+ * @brief Applies Hann Window tecnique in order to avoid spectral leakage
+ * 
+ * @param input input data to be handled
+ * @param size size of the input data
+ */
 void applyHannWindow(double* input, int size)
 {
     for (int i = 0; i < size; ++i)
@@ -211,6 +276,15 @@ void applyHannWindow(double* input, int size)
     }
 }
 
+/**
+ * @brief Checks if the currently playing file has been upscaled
+ * 
+ * @param fftOutput the fft to be analyzed
+ * @param fftSize size of data to be analyzed
+ * @param sampleRate rate of data sampling
+ * @return true if the file has been upscaled
+ * @return false if the file is in real format
+ */
 bool detectFrequencyCutoff(double* fftOutput, int fftSize, int sampleRate)
 {
     // Detects if cuts over 16kHz happened. If nyquist is under then we cannot reconstruct the signal 
@@ -244,6 +318,15 @@ bool detectFrequencyCutoff(double* fftOutput, int fftSize, int sampleRate)
     return (ratio < minRatio) ? true : false;
 }
 
+/**
+ * @brief Checks if the current file has been upscaled
+ * 
+ * @param file file to check
+ * @param info meta informations related to the file
+ * @param data callback data used for analysis
+ * @return true if the file could have been upsaled
+ * @return false if the file could have not been upscaled
+ */
 bool isProbablyMP3(SNDFILE* file, const SF_INFO& info, FileCallbackData* data)
 {
     // Skips the first few seconds to avoid silence/fades
@@ -306,7 +389,7 @@ bool isProbablyMP3(SNDFILE* file, const SF_INFO& info, FileCallbackData* data)
 int main(int argc, const char* argv[])
 {
     // The application provides two different features:
-    // Microphone audio capturing and fake High Resolution audio files recognition
+    // Microphone audio capturing and upscaled audio files recognition
     // 1. If no arguments are provided, audio capturing is performed,
     // 2. If a audio file path is provided, audio recognition is performed.
     //      2.1. If the file is original, the file is reproduced
