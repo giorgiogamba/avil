@@ -306,24 +306,45 @@ int main(int argc, const char* argv[])
     {
         std::cout << "No arguments provided, starting microphone audio playback\n";
 
-        constexpr int deviceIdx = 1;
-
         listAvailableDevices();
+
+        int deviceIdx = Pa_GetDefaultInputDevice();
+        if (deviceIdx == paNoDevice)
+        {
+            std::cout << "[PortAudio Error] No default input device found\n";
+            return EXIT_FAILURE;
+        }
+
+        std::cout << "Using device " << deviceIdx << "\n";
+        const PaDeviceInfo* deviceInfo = Pa_GetDeviceInfo(deviceIdx);
+        std::cout << "Device max input channels: " << deviceInfo->maxInputChannels << "\n";
+        std::cout << "Device max output channels: " << deviceInfo->maxOutputChannels << "\n";
+
+        // Use minimum of requested channels and device's max channels
+        int inputChannels = std::min(NUM_CHANNELS, deviceInfo->maxInputChannels);
+        if (inputChannels <= 0)
+        {
+            std::cout << "[PortAudio Error] Device has no input channels\n";
+            return EXIT_FAILURE;
+        }
 
         std::cout << "Input stream configuration ..." << std::endl;
         PaStreamParameters inStreamParams;
         memset(&inStreamParams, 0, sizeof(inStreamParams));
-        inStreamParams.channelCount = NUM_CHANNELS;
+        inStreamParams.channelCount = inputChannels;
         inStreamParams.device = deviceIdx;
         inStreamParams.hostApiSpecificStreamInfo = nullptr;
         inStreamParams.sampleFormat = paFloat32;
-        inStreamParams.suggestedLatency = Pa_GetDeviceInfo(deviceIdx)->defaultLowInputLatency;
+        inStreamParams.suggestedLatency = deviceInfo->defaultLowInputLatency;
 
         PaStreamParameters outParams;
-        outParams.device = Pa_GetDefaultOutputDevice();
-        outParams.channelCount = NUM_CHANNELS;
+        int outputDevice = Pa_GetDefaultOutputDevice();
+        outParams.device = outputDevice;
+        const PaDeviceInfo* outDeviceInfo = Pa_GetDeviceInfo(outputDevice);
+        int outputChannels = std::min(NUM_CHANNELS, outDeviceInfo->maxOutputChannels);
+        outParams.channelCount = outputChannels;
         outParams.sampleFormat = paFloat32;
-        outParams.suggestedLatency = Pa_GetDeviceInfo(Pa_GetDefaultOutputDevice())->defaultLowInputLatency;
+        outParams.suggestedLatency = outDeviceInfo->defaultLowOutputLatency;
         outParams.hostApiSpecificStreamInfo = nullptr;
 
         spectrogramData = (StreamCallbackData*)malloc(sizeof(StreamCallbackData));
@@ -367,6 +388,16 @@ int main(int argc, const char* argv[])
         if (sf_error(data.file) != SF_ERR_NO_ERROR)
         {
             std::cout << "[AVIL ERROR] An error occured while opening file " << filePath << ". ("<< sf_strerror(data.file) <<")\n";
+            return EXIT_FAILURE;
+        }
+
+        std::cout << "File opened successfully. Channels: " << data.info.channels << ", Sample rate: " << data.info.samplerate << "\n";
+
+        // Validate channel count
+        if (data.info.channels <= 0 || data.info.channels > 32)
+        {
+            std::cout << "[AVIL ERROR] Invalid channel count in file: " << data.info.channels << "\n";
+            sf_close(data.file);
             return EXIT_FAILURE;
         }
 
