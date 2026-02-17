@@ -148,6 +148,11 @@ Result: TRANSCODED MP3 (Confidence: 94.2%)
 2. **MP3 Artifact Detection**: Developed heuristic combining frequency analysis, spectral envelope, and entropy measurements
 3. **Cross-platform Audio I/O**: Abstracted macOS Core Audio APIs into portable C++ interface
 
+## Future developments
+
+- Improve upscaling detection algorithm
+- Create TUI
+
 ## Contributing
 
 Contributions are welcome! Areas of particular interest:
