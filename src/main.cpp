@@ -14,6 +14,11 @@
 static StreamCallbackData* spectrogramData;
 static FileCallbackData* fileSpectrogramData;
 
+static std::vector<float> magnitudes(DISPLAY_SIZE, 0.f);
+static std::mutex mtxMagnitudes;
+static float magnitudeL = 0.f;
+static float magnitudeR = 0.f;
+
 /**
  * @brief Analyzes the passes error and eventually prints its content
  * @param error The error to be analyzeds
@@ -33,28 +38,21 @@ void checkError(const PaError& error)
  * @param in Data to be displayed
  * @param framesPerBuffer Number of frames to be analyzed from in buffer
  */
-void printVolumeGraph(const float* in, unsigned long framesPerBuffer)
+void updateVolumeGraph(const float* in, unsigned long framesPerBuffer)
 {
-    printf("\r");
-
-    // Gets greatest volume in the buffer for L and R channels
-    float volume_L = 0;
-    float volume_R = 0;
-    
-    // Parse over elements considering them in couples L, R
+    // Parses over elements considering them in couples L, R
+    // and gets the greates value of the buffer
+    float volumeL = 0, volumeR = 0;
     for (unsigned long i = 0; i < framesPerBuffer * 2; i += 2)
     {
-        volume_L = std::max(volume_L, std::abs(in[i]));
-        volume_R = std::max(volume_R, std::abs(in[i+1]));
+        volumeL = std::max(volumeL, std::abs(in[i]));
+        volumeR = std::max(volumeR, std::abs(in[i+1]));
     }
 
     // Prints resulting volume bars
-    for (int i = 0; i < DISPLAY_SIZE; ++i)
-    {
-        const float bar = i / static_cast<float>(DISPLAY_SIZE);
-        const std::string volumeBar = (bar <= volume_L && bar <= volume_R) ? "|" : " ";
-        printf("%s", volumeBar.c_str());
-    }
+    std::unique_lock<std::mutex> lock(mtxMagnitudes);
+    magnitudeL = volumeL;
+    magnitudeR = volumeR;
 }
 
 /**
@@ -86,7 +84,7 @@ double getMagnitude(double* fftOutput, const int bin, const int size)
  * @param framesPerBuffer length on input data in
  * @param userData data to handle fft
  */
-void printFileFrequencyGraph(const float* in, unsigned long framesPerBuffer, void* userData)
+void updateFrequencyGraph(const float* in, unsigned long framesPerBuffer, void* userData)
 {
     StreamCallbackData* streamData = reinterpret_cast<StreamCallbackData*>(userData);
 
@@ -99,21 +97,43 @@ void printFileFrequencyGraph(const float* in, unsigned long framesPerBuffer, voi
     // Executes fourier transform on the stremed data
     fftw_execute(streamData->p);
 
+
+    std::vector<float> rawMagnitudes(DISPLAY_SIZE);
+    double maxRawMagnitude = -__DBL_MAX__;
     for (int i{0}; i < DISPLAY_SIZE; ++i)
     {
         const double step = i / static_cast<double>(DISPLAY_SIZE);
         const auto binIdx = static_cast<int>(streamData->startIndex + step * streamData->sprectrogramSize);
         const auto mag = getMagnitude(streamData->out, binIdx, FRAMES_PER_BUFFER);
-
-        if      (mag < 0.125)   printf("▁");
-        else if (mag < 0.25)    printf("▂");
-        else if (mag < 0.375)   printf("▃");
-        else if (mag< 0.5)      printf("▄");
-        else if (mag < 0.625)   printf("▅");
-        else if (mag < 0.75)    printf("▆");
-        else if (mag < 0.925)   printf("▇");
-        else                    printf("█");
+        rawMagnitudes[i] = mag;
+        maxRawMagnitude = std::max(maxRawMagnitude, mag);
     }
+
+    /**
+     * @brief How this value is composed
+     * Since magnitudes are complex numbers, they are scaling wiht FRAMES_PER_BUFFER * FRAMES_PER_BUFFER
+     * 1e-6 corresponds to an amplitude of 0.001, whihc is -60db, which is a standard noise flooe
+     */
+    constexpr double MIN_DISPLAY_ENERGY = 1e-6 * FRAMES_PER_BUFFER * FRAMES_PER_BUFFER;
+
+    // Once all the magnitudes are collected, normalize them based on the max value
+    std::vector<float> frequenciesMagnitudes(DISPLAY_SIZE);
+    const double logMaxRawMagnitude = std::log1p(maxRawMagnitude);
+    for (int i{0}; i < DISPLAY_SIZE; ++i)
+    {
+        // Avoids division with 0
+        if (logMaxRawMagnitude <= 0.0 || rawMagnitudes[i] < MIN_DISPLAY_ENERGY)
+        {
+            frequenciesMagnitudes[i] = 0.f;
+            continue;
+        }
+
+        const float normalizedMagnitude = static_cast<float>(std::log1p(rawMagnitudes[i]) / logMaxRawMagnitude);
+        frequenciesMagnitudes[i] = std::clamp(normalizedMagnitude, 0.f, 1.f);
+    }
+
+    std::unique_lock<std::mutex> lock(mtxMagnitudes);
+    magnitudes.swap(frequenciesMagnitudes);
 }
 
 /**
@@ -145,9 +165,8 @@ int fileStreamCallback  ( const void* inputBuffer
     // Transposes read data into the output buffer
     const sf_count_t numRead = sf_read_float(data->file, out, framesPerBuffer * data->info.channels);
 
-    printVolumeGraph(out, framesPerBuffer);
-    printFileFrequencyGraph(out, framesPerBuffer, data);
-    fflush(stdout);
+    updateVolumeGraph(out, framesPerBuffer);
+    updateFrequencyGraph(out, framesPerBuffer, data);
 
     const bool fileEnded = numRead < framesPerBuffer;
     return fileEnded ? paComplete : paContinue;
@@ -194,9 +213,8 @@ int microphoneStreamCallback( const void* inputBuffer
             output[i * NUM_CHANNELS + ch] = processedSample * GAIN_REDUCTION_FACTOR;
     }
 
-    printVolumeGraph(input, framesPerBuffer);
-    printFileFrequencyGraph((float*)output, framesPerBuffer, data);
-    fflush(stdout);
+    updateVolumeGraph(input, framesPerBuffer);
+    updateFrequencyGraph((float*)output, framesPerBuffer, data);
 
     return paContinue;
 }
