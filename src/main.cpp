@@ -394,6 +394,76 @@ bool isProbablyMP3(SNDFILE* file, const SF_INFO& info, FileCallbackData* data)
     return ratio > 0.7;
 }
 
+void runTUI(ftxui::ScreenInteractive& screen, bool* running)
+{
+    using namespace ftxui;
+
+    // Refreshes TUI at 60 fps
+    std::thread refreshThread([&screen, running]()
+    {
+        while (*running)
+        {
+            std::this_thread::sleep_for(std::chrono::milliseconds(16));
+            screen.PostEvent(Event::Custom);
+        }
+    });
+
+    // Creates the TUI
+    auto renderer = Renderer([&] {
+        std::lock_guard<std::mutex> lock(mtxMagnitudes);
+
+        // Spectrum bars
+        Elements bars;
+        for (const float mag : magnitudes)
+            bars.push_back(gaugeDown(mag) | color(Color::Green) | flex);
+
+        auto volumeMeters = hbox({
+            text("L ")          | color(Color::Yellow),
+            gauge(magnitudeL)   | color(Color::Yellow) | flex,
+            text(" R ")         | color(Color::Yellow),
+            gauge(magnitudeR)   | color(Color::Yellow) | flex,
+        });
+
+        // MP3 detection result
+        // auto status = g_mp3_status.empty()
+        //     ? text("Analyzing...")
+        //     : text(g_mp3_status) | color(g_mp3_status.find("WARNING") != std::string::npos
+        //         ? Color::Red : Color::Green);
+
+        return vbox({
+            text("  avil — spectrum visualizer  ") | bold | center | color(Color::Cyan),
+            separator(),
+            hbox(bars) | ftxui::flex,
+            separator(),
+            volumeMeters,
+            // separator(),
+            // status | center,
+            separator(),
+            text("Ctrl+C to quit") | dim | center,
+        }) | border;
+    });
+
+    auto ioComponent = CatchEvent(renderer, [&](Event event)
+    {
+        if (event == Event::Character('q'))
+        {
+            *running = false;
+            screen.ExitLoopClosure()();
+            return true;
+        }
+
+        return false;
+    });
+
+    screen.Loop(ioComponent);
+
+    *running = false;
+    refreshThread.join();
+
+    constexpr const char* CLEAR_TERMINAL_CODE{"\033[2J\033[H"};
+    std::cout << CLEAR_TERMINAL_CODE << std::flush;
+}
+
 int main(int argc, const char* argv[])
 {
     // The application provides two different features:
