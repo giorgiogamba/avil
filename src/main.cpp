@@ -385,9 +385,6 @@ int main(int argc, const char* argv[])
     //      2.1. If the file is original, the file is reproduced
     // Both features, when reproducing something, show a cmdline spectrum analyzer and amplitude meter
 
-    std::cout << "=== AVIL ===" << std::endl;
-    std::cout << "Press Ctrl+C to stop the application" << std::endl;
-
     PaError error;
     error = Pa_Initialize();
     checkError(error);
@@ -395,9 +392,7 @@ int main(int argc, const char* argv[])
     // Reads cli arguments
     if (argc == 1)
     {
-        std::cout << "No arguments provided, starting microphone audio playback" << std::endl;
-
-        listAvailableDevices();
+        //listAvailableDevices();
 
         int deviceIdx = Pa_GetDefaultInputDevice();
         if (deviceIdx == paNoDevice)
@@ -406,11 +401,7 @@ int main(int argc, const char* argv[])
             return EXIT_FAILURE;
         }
 
-        std::cout << "Using device " << deviceIdx << std::endl;
-
         const PaDeviceInfo* deviceInfo = Pa_GetDeviceInfo(deviceIdx);
-        std::cout << "Device max input channels: " << deviceInfo->maxInputChannels << std::endl;
-        std::cout << "Device max output channels: " << deviceInfo->maxOutputChannels << std::endl;
 
         // Use minimum of requested channels and device's max channels
         const int inputChannels = std::min(NUM_CHANNELS, deviceInfo->maxInputChannels);
@@ -420,8 +411,6 @@ int main(int argc, const char* argv[])
             return EXIT_FAILURE;
         }
 
-        std::cout << "Input stream configuration ..." << std::endl;
-
         PaStreamParameters inStreamParams;
         memset(&inStreamParams, 0, sizeof(inStreamParams));
         inStreamParams.channelCount = inputChannels;
@@ -430,7 +419,6 @@ int main(int argc, const char* argv[])
         inStreamParams.sampleFormat = paFloat32;
         inStreamParams.suggestedLatency = deviceInfo->defaultLowInputLatency;
 
-        std::cout << "Output stream configuration ..." << std::endl;
         PaStreamParameters outParams;
         const int outputDevice = Pa_GetDefaultOutputDevice();
         outParams.device = outputDevice;
@@ -441,7 +429,6 @@ int main(int argc, const char* argv[])
         outParams.suggestedLatency = outDeviceInfo->defaultLowOutputLatency;
         outParams.hostApiSpecificStreamInfo = nullptr;
 
-        std::cout << "Spectrogram configuration ..." << std::endl;
         spectrogramData = (StreamCallbackData*)malloc(sizeof(StreamCallbackData));
         spectrogramData->in = (double*)fftw_malloc(FRAMES_PER_BUFFER * sizeof(double));
         spectrogramData->out = (double*)fftw_malloc(FRAMES_PER_BUFFER * sizeof(double));
@@ -459,12 +446,9 @@ int main(int argc, const char* argv[])
         // Defines the Fourier transform. Data need to remain the same as long as this profile is chosen
         spectrogramData->p = fftw_plan_r2r_1d(FRAMES_PER_BUFFER, spectrogramData->in, spectrogramData->out, FFTW_R2HC, FFTW_ESTIMATE);
 
-        std::cout << "Opening stream ..." << std::endl;
         PaStream* stream;
         error = Pa_OpenStream(&stream, &inStreamParams, &outParams, 44100.0, 512, paNoFlag, microphoneStreamCallback, spectrogramData);
         checkError(error);
-
-        std::cout << "Starting stream ..." << std::endl;
         error = Pa_StartStream(stream);
         checkError(error);
 
@@ -473,8 +457,6 @@ int main(int argc, const char* argv[])
     }
     else if (argc == 2)
     {
-        std::cout << "One argument provided, analyzing and reproducing the file at the provided path" << std::endl;
-
         const char* filePath = argv[1];
         FileCallbackData data{};
         data.file = sf_open(filePath, SFM_READ, &data.info);
@@ -483,8 +465,6 @@ int main(int argc, const char* argv[])
             std::cout << "[AVIL ERROR] An error occured while opening file " << filePath << ". ("<< sf_strerror(data.file) <<")" << std::endl;
             return EXIT_FAILURE;
         }
-
-        std::cout << "File opened successfully. Channels: " << data.info.channels << ", Sample rate: " << data.info.samplerate << std::endl;
 
         // Validate channel count
         if (data.info.channels <= 0 || data.info.channels > 32)
@@ -527,7 +507,6 @@ int main(int argc, const char* argv[])
             return EXIT_FAILURE;
         }
 
-        std::cout << "Starting stream, stop it with Ctrl+C..." << std::endl;
         error = Pa_StartStream(stream);
         checkError(error);
 
@@ -537,7 +516,6 @@ int main(int argc, const char* argv[])
 
         error = Pa_StopStream(stream);
         checkError(error);
-
         error = Pa_CloseStream(stream);
         checkError(error);
     }
