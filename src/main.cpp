@@ -6,6 +6,11 @@
 #include <iostream>
 #include <iomanip>
 #include <cmath>
+#include <ftxui/dom/elements.hpp>
+#include <ftxui/screen/screen.hpp>
+#include <ftxui/component/loop.hpp>
+#include <ftxui/component/screen_interactive.hpp>
+#include <ftxui/component/component.hpp>
 
 #include "types.h"
 #include "constants.h"
@@ -394,7 +399,7 @@ bool isProbablyMP3(SNDFILE* file, const SF_INFO& info, FileCallbackData* data)
     return ratio > 0.7;
 }
 
-void runTUI(ftxui::ScreenInteractive& screen, bool* running)
+void runTUI(ftxui::ScreenInteractive& screen, std::atomic<bool>* running)
 {
     using namespace ftxui;
 
@@ -417,6 +422,30 @@ void runTUI(ftxui::ScreenInteractive& screen, bool* running)
         for (const float mag : magnitudes)
             bars.push_back(gaugeDown(mag) | color(Color::Green) | flex);
 
+        // Y axis labels, evenly spaced top to bottom (0dB at top, -60dB at bottom)
+        auto yAxis = vbox({
+            text("0dB")  | color(Color::GrayLight),
+            filler(),
+            text("-20")  | color(Color::GrayLight),
+            filler(),
+            text("-40")  | color(Color::GrayLight),
+            filler(),
+            text("-60")  | color(Color::GrayLight),
+        }) | size(WIDTH, EQUAL, 4);
+
+        // X axis frequency labels evenly spaced
+        auto xAxis = hbox({
+            text(std::to_string((int)SPECTROGRAM_FREQ_START) + "Hz") | color(Color::GrayLight),
+            filler(),
+            text(std::to_string((int)(SPECTROGRAM_FREQ_START + (SPECTROGRAM_FREQ_END - SPECTROGRAM_FREQ_START) * 0.25f) / 1000) + "kHz") | color(Color::GrayLight),
+            filler(),
+            text(std::to_string((int)(SPECTROGRAM_FREQ_START + (SPECTROGRAM_FREQ_END - SPECTROGRAM_FREQ_START) * 0.5f) / 1000) + "kHz") | color(Color::GrayLight),
+            filler(),
+            text(std::to_string((int)(SPECTROGRAM_FREQ_START + (SPECTROGRAM_FREQ_END - SPECTROGRAM_FREQ_START) * 0.75f) / 1000) + "kHz") | color(Color::GrayLight),
+            filler(),
+            text(std::to_string((int)SPECTROGRAM_FREQ_END / 1000) + "kHz") | color(Color::GrayLight),
+        });
+
         auto volumeMeters = hbox({
             text("L ")          | color(Color::Yellow),
             gauge(magnitudeL)   | color(Color::Yellow) | flex,
@@ -433,7 +462,13 @@ void runTUI(ftxui::ScreenInteractive& screen, bool* running)
         return vbox({
             text("  avil — spectrum visualizer  ") | bold | center | color(Color::Cyan),
             separator(),
-            hbox(bars) | ftxui::flex,
+            hbox({
+                yAxis,
+                separator(),
+                hbox(bars) | flex,
+            }) | flex,
+            separator(),
+            hbox({text("     "), xAxis | flex}),
             separator(),
             volumeMeters,
             // separator(),
