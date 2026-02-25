@@ -22,12 +22,10 @@ AVIL is a high-performance C++20 audio processing library that detects fraudulen
 - **Audio Authenticity Detection**
   - Identifies MP3-to-WAV conversions through spectral analysis
   - Detects artificial upscaling and lossy transcoding
-  - Validates audio file integrity for professional use
 
 - **Real-time Spectrum Visualization**
   - Command-line spectrogram rendering
   - Live volume monitoring and analysis
-  - Customizable frequency range and resolution
 
 - **Performance Optimized**
   - AVX2 SIMD acceleration for FFT operations
