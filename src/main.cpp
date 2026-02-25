@@ -23,6 +23,7 @@ static std::vector<float> magnitudes(DISPLAY_SIZE, 0.f);
 static std::mutex mtxMagnitudes;
 static float magnitudeL = 0.f;
 static float magnitudeR = 0.f;
+static std::string upscalingDetectionResultString = "";
 
 /**
  * @brief Analyzes the passes error and eventually prints its content
@@ -420,10 +421,12 @@ void runTUI(ftxui::ScreenInteractive& screen, std::atomic<bool>* running)
         // Spectrum bars
         Elements bars;
         for (const float mag : magnitudes)
-            bars.push_back(gaugeDown(mag) | color(Color::Green) | flex);
+            // Need to take 1.f - value becuase ftxui doesn't have a
+            // bar representation going from bottom to top
+            bars.push_back(gaugeDown(1.f - mag) | color(Color::Green) | flex);
 
         // Y axis labels, evenly spaced top to bottom (0dB at top, -60dB at bottom)
-        auto yAxis = vbox({
+        const auto yAxis = vbox({
             text("0dB")  | color(Color::GrayLight),
             filler(),
             text("-20")  | color(Color::GrayLight),
@@ -434,7 +437,7 @@ void runTUI(ftxui::ScreenInteractive& screen, std::atomic<bool>* running)
         }) | size(WIDTH, EQUAL, 4);
 
         // X axis frequency labels evenly spaced
-        auto xAxis = hbox({
+        const auto xAxis = hbox({
             text(std::to_string((int)SPECTROGRAM_FREQ_START) + "Hz") | color(Color::GrayLight),
             filler(),
             text(std::to_string((int)(SPECTROGRAM_FREQ_START + (SPECTROGRAM_FREQ_END - SPECTROGRAM_FREQ_START) * 0.25f) / 1000) + "kHz") | color(Color::GrayLight),
@@ -446,18 +449,16 @@ void runTUI(ftxui::ScreenInteractive& screen, std::atomic<bool>* running)
             text(std::to_string((int)SPECTROGRAM_FREQ_END / 1000) + "kHz") | color(Color::GrayLight),
         });
 
-        auto volumeMeters = hbox({
+        const auto volumeMeters = hbox({
             text("L ")          | color(Color::Yellow),
             gauge(magnitudeL)   | color(Color::Yellow) | flex,
             text(" R ")         | color(Color::Yellow),
             gauge(magnitudeR)   | color(Color::Yellow) | flex,
         });
 
-        // MP3 detection result
-        // auto status = g_mp3_status.empty()
-        //     ? text("Analyzing...")
-        //     : text(g_mp3_status) | color(g_mp3_status.find("WARNING") != std::string::npos
-        //         ? Color::Red : Color::Green);
+        const auto upscalingDetectionResult = upscalingDetectionResultString.empty()
+            ? text("")
+            : text(upscalingDetectionResultString) | color(upscalingDetectionResultString == "WARNING" ? Color::Red : Color::Green);
 
         return vbox({
             text("  avil — spectrum visualizer  ") | bold | center | color(Color::Cyan),
@@ -471,8 +472,8 @@ void runTUI(ftxui::ScreenInteractive& screen, std::atomic<bool>* running)
             hbox({text("     "), xAxis | flex}),
             separator(),
             volumeMeters,
-            // separator(),
-            // status | center,
+            separator(),
+            upscalingDetectionResult | center,
             separator(),
             text("Ctrl+C to quit") | dim | center,
         }) | border;
@@ -575,8 +576,10 @@ int main(int argc, const char* argv[])
         error = Pa_StartStream(stream);
         checkError(error);
 
-        while (true)
-            Pa_Sleep(1);
+        // Activates microphone player
+        std::atomic<bool> running = true;
+        auto screen = ftxui::ScreenInteractive::Fullscreen();
+        runTUI(screen, &running);
     }
     else if (argc == 2)
     {
@@ -622,20 +625,36 @@ int main(int argc, const char* argv[])
 
         if (isProbablyMP3(fileSpectrogramData->file, fileSpectrogramData->info, fileSpectrogramData))
         {
-            std::cout << "WARNING. The file is probably a mp3 file converted to wav file" << std::endl;
+            upscalingDetectionResultString = "Probably the file has been upscaled";
             Pa_CloseStream(stream);
             Pa_Terminate();
             sf_close(data.file);
             releaseResources(fileSpectrogramData);
             return EXIT_FAILURE;
         }
+        else
+        {
+            upscalingDetectionResultString = "File doesn't look upscaled";
+        }
 
         error = Pa_StartStream(stream);
         checkError(error);
 
-        // Plays until the file continues
-        while (Pa_IsStreamActive(stream))
-            Pa_Sleep(100);
+        std::atomic<bool> running{true};
+        auto screen = ftxui::ScreenInteractive::Fullscreen();
+
+        std::thread filePlayer([&]()
+        {
+            while (Pa_IsStreamActive(stream) && running)
+                Pa_Sleep(100);
+
+            // File ended
+            running = false;
+            screen.ExitLoopClosure()();
+        });
+
+        runTUI(screen, &running);
+        filePlayer.join();
 
         error = Pa_StopStream(stream);
         checkError(error);
