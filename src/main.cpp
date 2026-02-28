@@ -271,7 +271,17 @@ bool detectFrequencyCutoff(const std::vector<std::complex<float>>& fftOutput, in
         return false;
 
     const double ratio = highFreqEnergy / midFreqEnergy;
-    return (ratio < MIN_RATIO) ? true : false;
+    const bool isOverThreshold = ratio < MIN_RATIO;
+    return isOverThreshold ? true : false;
+}
+
+void stopStream(PaStream* stream)
+{
+    PaError error{};
+    error = Pa_StopStream(stream);
+    checkError(error);
+    error = Pa_CloseStream(stream);
+    checkError(error);
 }
 
 /**
@@ -462,9 +472,7 @@ int main(int argc, const char* argv[])
     // Reads cli arguments
     if (argc == 1)
     {
-        //listAvailableDevices();
-
-        int deviceIdx = Pa_GetDefaultInputDevice();
+        const int deviceIdx = Pa_GetDefaultInputDevice();
         if (deviceIdx == paNoDevice)
         {
             std::cout << "[PortAudio Error] No default input device found" << std::endl;
@@ -472,8 +480,6 @@ int main(int argc, const char* argv[])
         }
 
         const PaDeviceInfo* deviceInfo = Pa_GetDeviceInfo(deviceIdx);
-
-        // Use minimum of requested channels and device's max channels
         const int inputChannels = std::min(NUM_CHANNELS, deviceInfo->maxInputChannels);
         if (inputChannels <= 0)
         {
@@ -513,6 +519,7 @@ int main(int argc, const char* argv[])
         std::atomic<bool> running = true;
         auto screen = ftxui::ScreenInteractive::Fullscreen();
         runTUI(screen, &running);
+        stopStream(stream);
     }
     else if (argc == 2)
     {
@@ -565,18 +572,14 @@ int main(int argc, const char* argv[])
             while (Pa_IsStreamActive(stream) && running)
                 Pa_Sleep(100);
 
-            // File ended
+            // File ended, closes TUI
             running = false;
             screen.ExitLoopClosure()();
         });
 
         runTUI(screen, &running);
         filePlayer.join();
-
-        error = Pa_StopStream(stream);
-        checkError(error);
-        error = Pa_CloseStream(stream);
-        checkError(error);
+        stopStream(stream);
     }
     else
     {
