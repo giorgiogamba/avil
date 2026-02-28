@@ -408,6 +408,7 @@ void runTUI(ftxui::ScreenInteractive& screen, std::atomic<bool>* running)
         }) | border;
     });
 
+    // Catches IO inputs and eventually stops the program
     auto ioComponent = CatchEvent(renderer, [&](Event event)
     {
         if (event == Event::Character('q'))
@@ -419,12 +420,13 @@ void runTUI(ftxui::ScreenInteractive& screen, std::atomic<bool>* running)
 
         return false;
     });
-
     screen.Loop(ioComponent);
 
+    // Cleans up components
     *running = false;
     refreshThread.join();
 
+    // Cleans the terminal
     constexpr const char* CLEAR_TERMINAL_CODE{"\033[2J\033[H"};
     std::cout << CLEAR_TERMINAL_CODE << std::flush;
 }
