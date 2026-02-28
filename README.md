@@ -9,6 +9,10 @@
 
 ---
 
+![avil_demo](https://github.com/user-attachments/assets/257431c3-3628-4ae3-a638-de4c7756b12b)
+
+---
+
 ## Features
 
 **MP3 transcoding detection** — loads a WAV file, runs an FFT-based spectral analysis across multiple frames, and flags files whose high-frequency energy drops off sharply above 16 kHz (a characteristic artifact of MP3 encoding). Reports a verdict based on how many frames exceed the cutoff threshold.
