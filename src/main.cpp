@@ -87,7 +87,7 @@ void updateFrequencyGraph(const float* in, unsigned long framesPerBuffer, const 
     FFT_AVX2::fft(signal.data(), framesPerBuffer);
 
     std::vector<float> rawMagnitudes(DISPLAY_SIZE);
-    double maxRawMagnitude = -__DBL_MAX__;
+    float maxRawMagnitude = -__FLT_MAX__;
     for (int i{0}; i < DISPLAY_SIZE; ++i)
     {
         const double step = i / static_cast<double>(DISPLAY_SIZE);
@@ -262,7 +262,6 @@ bool detectFrequencyCutoff(const std::vector<std::complex<float>>& fftOutput, in
         highFreqEnergy += getComplexMagnitude(fftOutput[i]);
 
     double midFreqEnergy = 0.0;
-    const int midStart = static_cast<int>((10000.0 * fftSize) / sampleRate);
     for (int i = midStart; i <= (cutoffBin - 1); ++i)
         midFreqEnergy += getComplexMagnitude(fftOutput[i]);
 
