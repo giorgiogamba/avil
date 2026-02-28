@@ -431,13 +431,124 @@ void runTUI(ftxui::ScreenInteractive& screen, std::atomic<bool>* running)
     std::cout << CLEAR_TERMINAL_CODE << std::flush;
 }
 
+void handleMicrophoneExecution(const double defSize, const double sampleRatio)
+{
+    const int deviceIdx = Pa_GetDefaultInputDevice();
+    if (deviceIdx == paNoDevice)
+    {
+        std::cout << "[PortAudio Error] No default input device found" << std::endl;
+        return;
+    }
+
+    const PaDeviceInfo* deviceInfo = Pa_GetDeviceInfo(deviceIdx);
+    const int inputChannels = std::min(NUM_CHANNELS, deviceInfo->maxInputChannels);
+    if (inputChannels <= 0)
+    {
+        std::cout << "[PortAudio Error] Device has no input channels" << std::endl;
+        return;
+    }
+
+    PaStreamParameters inStreamParams;
+    memset(&inStreamParams, 0, sizeof(inStreamParams));
+    inStreamParams.channelCount = inputChannels;
+    inStreamParams.device = deviceIdx;
+    inStreamParams.hostApiSpecificStreamInfo = nullptr;
+    inStreamParams.sampleFormat = paFloat32;
+    inStreamParams.suggestedLatency = deviceInfo->defaultLowInputLatency;
+
+    PaStreamParameters outParams;
+    outParams.device = Pa_GetDefaultOutputDevice();
+    const PaDeviceInfo* outDeviceInfo = Pa_GetDeviceInfo(outParams.device);
+    outParams.channelCount = std::min(NUM_CHANNELS, outDeviceInfo->maxOutputChannels);
+    outParams.sampleFormat = paFloat32;
+    outParams.suggestedLatency = outDeviceInfo->defaultLowOutputLatency;
+    outParams.hostApiSpecificStreamInfo = nullptr;
+
+    spectrogramData = (StreamCallbackData*)malloc(sizeof(StreamCallbackData));
+    spectrogramData->startIndex = std::ceil(sampleRatio * SPECTROGRAM_FREQ_START);
+    spectrogramData->sprectrogramSize = std::min(std::ceil(sampleRatio * SPECTROGRAM_FREQ_END), defSize) - spectrogramData->startIndex;
+
+    PaError error;
+    PaStream* stream;
+    error = Pa_OpenStream(&stream, &inStreamParams, &outParams, 44100.0, 512, paNoFlag, microphoneStreamCallback, spectrogramData);
+    checkError(error);
+    error = Pa_StartStream(stream);
+    checkError(error);
+
+    // Activates microphone player
+    std::atomic<bool> running = true;
+    auto screen = ftxui::ScreenInteractive::Fullscreen();
+    runTUI(screen, &running);
+    stopStream(stream);
+}
+
+void handleFileExecution(const std::string& filePath, const double defSize, const double sampleRatio)
+{
+    FileCallbackData data{};
+    data.file = sf_open(filePath.c_str(), SFM_READ, &data.info);
+    if (sf_error(data.file) != SF_ERR_NO_ERROR)
+    {
+        std::cout << "[AVIL ERROR] An error occured while opening file " << filePath << ". ("<< sf_strerror(data.file) <<")" << std::endl;
+        return;
+    }
+
+    // Validates channel count
+    if (data.info.channels <= 0 || data.info.channels > 32)
+    {
+        std::cout << "[AVIL ERROR] Invalid channel count in file: " << data.info.channels << std::endl;
+        sf_close(data.file);
+        return;
+    }
+
+    fileSpectrogramData = (FileCallbackData*)malloc(sizeof(FileCallbackData));
+    fileSpectrogramData->startIndex = std::ceil(sampleRatio * SPECTROGRAM_FREQ_START);
+    fileSpectrogramData->sprectrogramSize = std::min(std::ceil(sampleRatio * SPECTROGRAM_FREQ_END), defSize) - fileSpectrogramData->startIndex;
+    fileSpectrogramData->file = data.file;
+    fileSpectrogramData->info = data.info;
+
+    if (isProbablyMP3(fileSpectrogramData->file, fileSpectrogramData->info))
+    {
+        upscalingDetectionResultString += "Probably the file has been upscaled";
+        sf_close(data.file);
+        return;
+    }
+    else
+    {
+        upscalingDetectionResultString += "The file doesn't look upscaled";
+    }
+
+    PaError error;
+    PaStream* stream;
+    error = Pa_OpenDefaultStream(&stream, 0, data.info.channels, paFloat32, data.info.samplerate, FRAMES_PER_BUFFER, fileStreamCallback, fileSpectrogramData);
+    checkError(error);
+    error = Pa_StartStream(stream);
+    checkError(error);
+
+    std::atomic<bool> running{true};
+    auto screen = ftxui::ScreenInteractive::Fullscreen();
+
+    // Plays the file
+    std::thread filePlayer([&]()
+    {
+        while (Pa_IsStreamActive(stream) && running)
+            Pa_Sleep(100);
+
+        // File ended, closes TUI
+        running = false;
+        screen.ExitLoopClosure()();
+    });
+
+    runTUI(screen, &running);
+    filePlayer.join();
+    stopStream(stream);
+}
+
 int main(int argc, const char* argv[])
 {
     // The application provides two different features:
     // Microphone audio capturing and upscaled audio files recognition
-    // 1. If no arguments are provided, audio capturing is performed,
+    // 1. If no arguments are provided, audio capturing is performed.
     // 2. If a audio file path is provided, audio recognition is performed.
-    //      2.1. If the file is original, the file is reproduced
     // Both features, when reproducing something, show a cmdline spectrum analyzer and amplitude meter
 
     PaError error;
@@ -445,124 +556,15 @@ int main(int argc, const char* argv[])
     checkError(error);
 
     constexpr double DEF_SIZE{FRAMES_PER_BUFFER / 2.0};
+    constexpr double SAMPLE_RATIO = FRAMES_PER_BUFFER / static_cast<double>(SAMPLE_RATE);
 
     // Reads cli arguments
     if (argc == 1)
-    {
-        const int deviceIdx = Pa_GetDefaultInputDevice();
-        if (deviceIdx == paNoDevice)
-        {
-            std::cout << "[PortAudio Error] No default input device found" << std::endl;
-            return EXIT_FAILURE;
-        }
-
-        const PaDeviceInfo* deviceInfo = Pa_GetDeviceInfo(deviceIdx);
-        const int inputChannels = std::min(NUM_CHANNELS, deviceInfo->maxInputChannels);
-        if (inputChannels <= 0)
-        {
-            std::cout << "[PortAudio Error] Device has no input channels" << std::endl;
-            return EXIT_FAILURE;
-        }
-
-        PaStreamParameters inStreamParams;
-        memset(&inStreamParams, 0, sizeof(inStreamParams));
-        inStreamParams.channelCount = inputChannels;
-        inStreamParams.device = deviceIdx;
-        inStreamParams.hostApiSpecificStreamInfo = nullptr;
-        inStreamParams.sampleFormat = paFloat32;
-        inStreamParams.suggestedLatency = deviceInfo->defaultLowInputLatency;
-
-        PaStreamParameters outParams;
-        outParams.device = Pa_GetDefaultOutputDevice();
-        const PaDeviceInfo* outDeviceInfo = Pa_GetDeviceInfo(outParams.device);
-        outParams.channelCount = std::min(NUM_CHANNELS, outDeviceInfo->maxOutputChannels);
-        outParams.sampleFormat = paFloat32;
-        outParams.suggestedLatency = outDeviceInfo->defaultLowOutputLatency;
-        outParams.hostApiSpecificStreamInfo = nullptr;
-
-        spectrogramData = (StreamCallbackData*)malloc(sizeof(StreamCallbackData));
-
-        constexpr double sampleRatio = FRAMES_PER_BUFFER / static_cast<double>(SAMPLE_RATE);
-        spectrogramData->startIndex = std::ceil(sampleRatio * SPECTROGRAM_FREQ_START);
-        spectrogramData->sprectrogramSize = std::min(std::ceil(sampleRatio * SPECTROGRAM_FREQ_END), DEF_SIZE) - spectrogramData->startIndex;
-
-        PaStream* stream;
-        error = Pa_OpenStream(&stream, &inStreamParams, &outParams, 44100.0, 512, paNoFlag, microphoneStreamCallback, spectrogramData);
-        checkError(error);
-        error = Pa_StartStream(stream);
-        checkError(error);
-
-        // Activates microphone player
-        std::atomic<bool> running = true;
-        auto screen = ftxui::ScreenInteractive::Fullscreen();
-        runTUI(screen, &running);
-        stopStream(stream);
-    }
+        handleMicrophoneExecution(DEF_SIZE, SAMPLE_RATIO);
     else if (argc == 2)
-    {
-        const char* filePath = argv[1];
-        FileCallbackData data{};
-        data.file = sf_open(filePath, SFM_READ, &data.info);
-        if (sf_error(data.file) != SF_ERR_NO_ERROR)
-        {
-            std::cout << "[AVIL ERROR] An error occured while opening file " << filePath << ". ("<< sf_strerror(data.file) <<")" << std::endl;
-            return EXIT_FAILURE;
-        }
-
-        // Validate channel count
-        if (data.info.channels <= 0 || data.info.channels > 32)
-        {
-            std::cout << "[AVIL ERROR] Invalid channel count in file: " << data.info.channels << std::endl;
-            sf_close(data.file);
-            return EXIT_FAILURE;
-        }
-
-        fileSpectrogramData = (FileCallbackData*)malloc(sizeof(FileCallbackData));
-        constexpr double sampleRatio = FRAMES_PER_BUFFER / static_cast<double>(SAMPLE_RATE);
-        fileSpectrogramData->startIndex = std::ceil(sampleRatio * SPECTROGRAM_FREQ_START);
-        fileSpectrogramData->sprectrogramSize = std::min(std::ceil(sampleRatio * SPECTROGRAM_FREQ_END), DEF_SIZE) - fileSpectrogramData->startIndex;
-        fileSpectrogramData->file = data.file;
-        fileSpectrogramData->info = data.info;
-
-        if (isProbablyMP3(fileSpectrogramData->file, fileSpectrogramData->info))
-        {
-            upscalingDetectionResultString += "Probably the file has been upscaled";
-            sf_close(data.file);
-            return EXIT_FAILURE;
-        }
-        else
-        {
-            upscalingDetectionResultString += "The file doesn't look upscaled";
-        }
-
-        PaStream* stream;
-        error = Pa_OpenDefaultStream(&stream, 0, data.info.channels, paFloat32, data.info.samplerate, FRAMES_PER_BUFFER, fileStreamCallback, fileSpectrogramData);
-        checkError(error);
-        error = Pa_StartStream(stream);
-        checkError(error);
-
-        std::atomic<bool> running{true};
-        auto screen = ftxui::ScreenInteractive::Fullscreen();
-
-        std::thread filePlayer([&]()
-        {
-            while (Pa_IsStreamActive(stream) && running)
-                Pa_Sleep(100);
-
-            // File ended, closes TUI
-            running = false;
-            screen.ExitLoopClosure()();
-        });
-
-        runTUI(screen, &running);
-        filePlayer.join();
-        stopStream(stream);
-    }
+        handleFileExecution(argv[1], DEF_SIZE, SAMPLE_RATIO);
     else
-    {
         std::cout << "[AVIL ERROR] Invalid arguments provided. Exiting..." << std::endl;
-        return EXIT_FAILURE;
-    }
 
     error = Pa_Terminate();
     checkError(error);
