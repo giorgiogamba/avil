@@ -77,29 +77,23 @@ void updateVolumeGraph(const float* in, unsigned long framesPerBuffer)
  * @param framesPerBuffer length on input data in
  * @param userData data to handle fft
  */
-void updateFrequencyGraph(const float* in, unsigned long framesPerBuffer, void* userData)
+void updateFrequencyGraph(const float* in, unsigned long framesPerBuffer, const double startIndex, const double spectrogramSize)
 {
-    StreamCallbackData* streamData = reinterpret_cast<StreamCallbackData*>(userData);
+    // Converts data in complex format
+    std::vector<std::complex<float>> signal(framesPerBuffer);
+    for (unsigned long i {0}; i < framesPerBuffer; ++i)
+        signal[i] = std::complex<float>(in[i * NUM_CHANNELS], 0.f);
 
-    // Collects data for Fourier transform display
-    // Audio channels samples are set in a matrix where row i contains i-th samples form all the audio channels
-    // We own just 2 channels, so we get the even samples
-    for (auto i{0}; i < framesPerBuffer; ++i)
-        streamData->in[i] = in[i * NUM_CHANNELS];
-
-    // Executes fourier transform on the stremed data
-    fftw_execute(streamData->p);
-
+    FFT_AVX2::fft(signal.data(), framesPerBuffer);
 
     std::vector<float> rawMagnitudes(DISPLAY_SIZE);
     double maxRawMagnitude = -__DBL_MAX__;
     for (int i{0}; i < DISPLAY_SIZE; ++i)
     {
         const double step = i / static_cast<double>(DISPLAY_SIZE);
-        const auto binIdx = static_cast<int>(streamData->startIndex + step * streamData->sprectrogramSize);
-        const double mag = getComplexMagnitude(signal[binIdx]);
-        rawMagnitudes[i] = mag;
-        maxRawMagnitude = std::max(maxRawMagnitude, mag);
+        const auto binIdx = static_cast<int>(startIndex + step * spectrogramSize);
+        rawMagnitudes[i] = getComplexMagnitude(signal[binIdx]);
+        maxRawMagnitude = std::max(maxRawMagnitude, rawMagnitudes[i]);
     }
 
     /**
@@ -159,7 +153,7 @@ int fileStreamCallback  ( const void* inputBuffer
     const sf_count_t numRead = sf_read_float(data->file, out, framesPerBuffer * data->info.channels);
 
     updateVolumeGraph(out, framesPerBuffer);
-    updateFrequencyGraph(out, framesPerBuffer, data);
+    updateFrequencyGraph(out, framesPerBuffer, data->startIndex, data->sprectrogramSize);
 
     const bool fileEnded = numRead < framesPerBuffer;
     return fileEnded ? paComplete : paContinue;
@@ -207,7 +201,7 @@ int microphoneStreamCallback( const void* inputBuffer
     }
 
     updateVolumeGraph(input, framesPerBuffer);
-    updateFrequencyGraph((float*)output, framesPerBuffer, data);
+    updateFrequencyGraph((float*)output, framesPerBuffer, data->startIndex, data->sprectrogramSize);
 
     return paContinue;
 }
@@ -292,7 +286,7 @@ void applyHannWindow(double* input, int size)
  * @return true if the file has been upscaled
  * @return false if the file is in real format
  */
-bool detectFrequencyCutoff(double* fftOutput, int fftSize, int sampleRate)
+bool detectFrequencyCutoff(const std::vector<std::complex<float>>& fftOutput, int fftSize, int sampleRate)
 {
     // Detects if cuts over 16kHz happened.
     // If nyquist is under then we cannot reconstruct the signal 
@@ -301,19 +295,21 @@ bool detectFrequencyCutoff(double* fftOutput, int fftSize, int sampleRate)
     if (nyquist < cutoffFreq)
         return false;
 
-    // Comparing over fftSize / 2 because using the FFT simmetry property
-    const int halfSize = fftSize / 2;
-
-    // Supposed the frequency spectrum is divided in bins, 
-    // gets the bin were the cutoff frequency appears
+    // Never read beyond half the buffer (FFT symmetry) or the buffer size itself
+    const int halfSize = std::min(fftSize / 2, static_cast<int>(fftOutput.size()));
     const int cutoffBin = static_cast<int>((cutoffFreq * fftSize) / sampleRate);
+    const int midStart  = static_cast<int>((10000.0 * fftSize) / sampleRate);
+
+    // Guard against bad bin calculations exceeding buffer
+    if (cutoffBin >= halfSize || midStart >= cutoffBin)
+        return false;
 
     double highFreqEnergy = 0.0;
     for (int i = cutoffBin; i < halfSize; ++i)
         highFreqEnergy += getComplexMagnitude(fftOutput[i]);
 
     double midFreqEnergy = 0.0;
-    int midStart = static_cast<int>((10000.0 * fftSize) / sampleRate);
+    const int midStart = static_cast<int>((10000.0 * fftSize) / sampleRate);
     for (int i = midStart; i <= (cutoffBin - 1); ++i)
         midFreqEnergy += getComplexMagnitude(fftOutput[i]);
 
@@ -334,7 +330,7 @@ bool detectFrequencyCutoff(double* fftOutput, int fftSize, int sampleRate)
  * @return true if the file could have been upsaled
  * @return false if the file could have not been upscaled
  */
-bool isProbablyMP3(SNDFILE* file, const SF_INFO& info, FileCallbackData* data)
+bool isProbablyMP3(SNDFILE* file, const SF_INFO& info)
 {
     // Skips the first few seconds to avoid silence/fades
     sf_seek(file, info.samplerate * info.channels * SECONDS_TO_SKIP, SEEK_SET);
@@ -349,30 +345,38 @@ bool isProbablyMP3(SNDFILE* file, const SF_INFO& info, FileCallbackData* data)
         if (numRead < FRAMES_PER_BUFFER)
             break;
 
-        // Downmixes to mono and computes colume (RMS)
+        std::vector<std::complex<float>> signal;
+        signal.resize(FRAMES_PER_BUFFER);
+
+        // Downmixes to mono and computes volume (RMS)
         double sumSq = 0.0;
         for (int i = 0; i < FRAMES_PER_BUFFER; ++i)
         {
-            data->in[i] = 0.f;
+            float mono = 0.f;
             for (int c = 0; c < info.channels; ++c)
-                data->in[i] += buffer[i * info.channels + c];
+                mono += buffer[i * info.channels + c];
 
-            data->in[i] /= info.channels;
-            sumSq += data->in[i] * data->in[i];
+            mono /= info.channels;
+            signal[i] = std::complex<float>(mono, 0.f);
+            sumSq += getComplexMagnitude(signal[i]);
         }
 
         // Avoids frequency analysis on bins that are too silent
         if (sqrt(sumSq / FRAMES_PER_BUFFER) < MIN_RATIO)
             continue;
 
-        validFrames ++;
+        validFrames++;
 
-        applyHannWindow(data->in, FRAMES_PER_BUFFER);
+        // Applies Hann Window
+        for (int i = 0; i < FRAMES_PER_BUFFER; ++i)
+        {
+            const double window = 0.5 * (1.0 - cos(2.0 * M_PI * i / (FRAMES_PER_BUFFER - 1)));
+            signal[i] = std::complex<float>(signal[i].real() * static_cast<float>(window));
+        }
 
-        // Executes Fourier transform
-        fftw_execute(data->p);
+        FFT_AVX2::fft(signal.data(), FRAMES_PER_BUFFER);
 
-        if (detectFrequencyCutoff(data->out, FRAMES_PER_BUFFER, info.samplerate))
+        if (detectFrequencyCutoff(signal, FRAMES_PER_BUFFER, info.samplerate))
             cutoffDetections++;
     }
 
@@ -500,6 +504,8 @@ int main(int argc, const char* argv[])
     error = Pa_Initialize();
     checkError(error);
 
+    constexpr double DEF_SIZE{FRAMES_PER_BUFFER / 2.0};
+
     // Reads cli arguments
     if (argc == 1)
     {
@@ -531,31 +537,18 @@ int main(int argc, const char* argv[])
         inStreamParams.suggestedLatency = deviceInfo->defaultLowInputLatency;
 
         PaStreamParameters outParams;
-        const int outputDevice = Pa_GetDefaultOutputDevice();
-        outParams.device = outputDevice;
-        const PaDeviceInfo* outDeviceInfo = Pa_GetDeviceInfo(outputDevice);
-        const int outputChannels = std::min(NUM_CHANNELS, outDeviceInfo->maxOutputChannels);
-        outParams.channelCount = outputChannels;
+        outParams.device = Pa_GetDefaultOutputDevice();
+        const PaDeviceInfo* outDeviceInfo = Pa_GetDeviceInfo(outParams.device);
+        outParams.channelCount = std::min(NUM_CHANNELS, outDeviceInfo->maxOutputChannels);
         outParams.sampleFormat = paFloat32;
         outParams.suggestedLatency = outDeviceInfo->defaultLowOutputLatency;
         outParams.hostApiSpecificStreamInfo = nullptr;
 
         spectrogramData = (StreamCallbackData*)malloc(sizeof(StreamCallbackData));
-        spectrogramData->in = (double*)fftw_malloc(FRAMES_PER_BUFFER * sizeof(double));
-        spectrogramData->out = (double*)fftw_malloc(FRAMES_PER_BUFFER * sizeof(double));
-        if (!spectrogramData->in || !spectrogramData->out)
-        {
-            std::cout << "[AVIL ERROR] Could not allocate spectrogram data" << std::endl;
-            exit(EXIT_FAILURE);
-        }
 
         constexpr double sampleRatio = FRAMES_PER_BUFFER / static_cast<double>(SAMPLE_RATE);
         spectrogramData->startIndex = std::ceil(sampleRatio * SPECTROGRAM_FREQ_START);
-        constexpr double DEF_SIZE{FRAMES_PER_BUFFER / 2.0};
         spectrogramData->sprectrogramSize = std::min(std::ceil(sampleRatio * SPECTROGRAM_FREQ_END), DEF_SIZE) - spectrogramData->startIndex;
-
-        // Defines the Fourier transform. Data need to remain the same as long as this profile is chosen
-        spectrogramData->p = fftw_plan_r2r_1d(FRAMES_PER_BUFFER, spectrogramData->in, spectrogramData->out, FFTW_R2HC, FFTW_ESTIMATE);
 
         PaStream* stream;
         error = Pa_OpenStream(&stream, &inStreamParams, &outParams, 44100.0, 512, paNoFlag, microphoneStreamCallback, spectrogramData);
@@ -588,35 +581,16 @@ int main(int argc, const char* argv[])
         }
 
         fileSpectrogramData = (FileCallbackData*)malloc(sizeof(FileCallbackData));
-        fileSpectrogramData->in = (double*)fftw_malloc(FRAMES_PER_BUFFER * sizeof(double));
-        fileSpectrogramData->out = (double*)fftw_malloc(FRAMES_PER_BUFFER * sizeof(double));
-        if (!fileSpectrogramData->in || !fileSpectrogramData->out)
-        {
-            std::cout << "[AVIL ERROR] Could not allocate spectrogram data" << std::endl;
-            exit(EXIT_FAILURE);
-        }
-
         constexpr double sampleRatio = FRAMES_PER_BUFFER / static_cast<double>(SAMPLE_RATE);
         fileSpectrogramData->startIndex = std::ceil(sampleRatio * SPECTROGRAM_FREQ_START);
-        constexpr double DEF_SIZE{FRAMES_PER_BUFFER / 2.0};
         fileSpectrogramData->sprectrogramSize = std::min(std::ceil(sampleRatio * SPECTROGRAM_FREQ_END), DEF_SIZE) - fileSpectrogramData->startIndex;
-
-        // Defines the Fourier transform. Data need to remain the same as long as this profile is chosen
-        fileSpectrogramData->p = fftw_plan_r2r_1d(FRAMES_PER_BUFFER, fileSpectrogramData->in, fileSpectrogramData->out, FFTW_R2HC, FFTW_ESTIMATE);
-
-        PaStream* stream;
         fileSpectrogramData->file = data.file;
         fileSpectrogramData->info = data.info;
-        error = Pa_OpenDefaultStream(&stream, 0, data.info.channels, paFloat32, data.info.samplerate, FRAMES_PER_BUFFER, fileStreamCallback, fileSpectrogramData);
-        checkError(error);
 
-        if (isProbablyMP3(fileSpectrogramData->file, fileSpectrogramData->info, fileSpectrogramData))
+        if (isProbablyMP3(fileSpectrogramData->file, fileSpectrogramData->info))
         {
-            upscalingDetectionResultString = "Probably the file has been upscaled";
-            Pa_CloseStream(stream);
-            Pa_Terminate();
+            upscalingDetectionResultString += "Probably the file has been upscaled";
             sf_close(data.file);
-            releaseResources(fileSpectrogramData);
             return EXIT_FAILURE;
         }
         else
@@ -624,6 +598,9 @@ int main(int argc, const char* argv[])
             upscalingDetectionResultString = "File doesn't look upscaled";
         }
 
+        PaStream* stream;
+        error = Pa_OpenDefaultStream(&stream, 0, data.info.channels, paFloat32, data.info.samplerate, FRAMES_PER_BUFFER, fileStreamCallback, fileSpectrogramData);
+        checkError(error);
         error = Pa_StartStream(stream);
         checkError(error);
 
