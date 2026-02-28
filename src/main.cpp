@@ -207,30 +207,6 @@ int microphoneStreamCallback( const void* inputBuffer
 }
 
 /**
- * @brief Displays available devices for the current device
- */
-void listAvailableDevices()
-{
-    std::cout << "===========================" << std::endl;
-    std::cout << "AVAILABLE DEVICES" << std::endl;
-    const int numDevices = Pa_GetDeviceCount();
-    std::cout << "Number of devices: " << numDevices << std::endl;
-
-    std::cout << "---------" << std::endl;
-    for (int i = 0; i < numDevices; ++i)
-    {
-        const PaDeviceInfo* deviceInfo = Pa_GetDeviceInfo(i);
-        std::cout << "Name: " << deviceInfo->name << std::endl;
-        std::cout << "INDEX: " << i << std::endl;
-        std::cout << "Sample rate: " << deviceInfo->defaultSampleRate << std::endl;
-        std::cout << "Low input latency: " << deviceInfo->defaultLowInputLatency << std::endl;
-        std::cout << "---------" << std::endl;
-    }
-
-    std::cout << "===========================" << std::endl;
-}
-
-/**
  * @brief Checks if the currently playing file has been upscaled
  * 
  * @param fftOutput the fft to be analyzed
