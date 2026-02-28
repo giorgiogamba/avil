@@ -231,53 +231,6 @@ void listAvailableDevices()
 }
 
 /**
- * @brief Frees resources for the passed spectrogram
- * 
- * @param fileSpectrogramData utility struct for file audio playback
- */
-void releaseResources(FileCallbackData* fileSpectrogramData)
-{
-    if (!fileSpectrogramData)
-        return;
-
-    fftw_destroy_plan(fileSpectrogramData->p);
-    fftw_free(fileSpectrogramData->in);
-    fftw_free(fileSpectrogramData->out);
-    fftw_free(fileSpectrogramData);
-}
-
-/**
- * @brief Frees resources for the passed spectrogram
- * 
- * @param fileSpectrogramData utility struct for microphone audio playback
- */
-void releaseStreamResources(StreamCallbackData* streamSpectrogramData)
-{
-    if (!streamSpectrogramData)
-        return;
-
-    fftw_destroy_plan(streamSpectrogramData->p);
-    fftw_free(streamSpectrogramData->in);
-    fftw_free(streamSpectrogramData->out);
-    free(streamSpectrogramData);
-}
-
-/**
- * @brief Applies Hann Window tecnique in order to avoid spectral leakage
- * 
- * @param input input data to be handled
- * @param size size of the input data
- */
-void applyHannWindow(double* input, int size)
-{
-    for (int i = 0; i < size; ++i)
-    {
-        const double window = 0.5 * (1.0 - cos(2.0 * M_PI * i / (size - 1)));
-        input[i] *= window;
-    }
-}
-
-/**
  * @brief Checks if the currently playing file has been upscaled
  * 
  * @param fftOutput the fft to be analyzed
@@ -634,8 +587,8 @@ int main(int argc, const char* argv[])
     error = Pa_Terminate();
     checkError(error);
 
-    releaseResources(fileSpectrogramData);
-    releaseStreamResources(spectrogramData);
+    free(fileSpectrogramData);
+    free(spectrogramData);
 
     return EXIT_SUCCESS;
 }
