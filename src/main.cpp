@@ -39,6 +39,15 @@ void checkError(const PaError& error)
 }
 
 /**
+ * @brief Returns the magnitude of the provided complex number
+ * @param c the complex number
+ */
+inline float getComplexMagnitude(const std::complex<float>& c) noexcept
+{
+    return c.real() * c.real() + c.imag() * c.imag();
+}
+
+/**
  * @brief Prints a cmd-line volume graph representing the volume of the passed input
  * 
  * @param in Data to be displayed
@@ -59,28 +68,6 @@ void updateVolumeGraph(const float* in, unsigned long framesPerBuffer)
     std::unique_lock<std::mutex> lock(mtxMagnitudes);
     magnitudeL = volumeL;
     magnitudeR = volumeR;
-}
-
-/**
- * @brief Utility function to retrieve magnitude from the passed fft object at the passed bin
- * 
- * @param fftOutput object representing FFT signal
- * @param bin index to be analuzed
- * @param size Buffers length
- * @return The magnitude of fftOutput of size size at the passed bin
- */
-double getMagnitude(double* fftOutput, const int bin, const int size)
-{
-    // Works on the R2HC format, where imaginary part for N is at length-N
-    if (bin == 0)
-        return fftOutput[0] * fftOutput[0];
-
-    if (bin == size && size % 2 == 0)
-        return fftOutput[bin] * fftOutput[bin];
-
-    const double real = fftOutput[bin];
-    const double imag = fftOutput[size - bin];
-    return (real * real + imag * imag);
 }
 
 /**
@@ -110,7 +97,7 @@ void updateFrequencyGraph(const float* in, unsigned long framesPerBuffer, void* 
     {
         const double step = i / static_cast<double>(DISPLAY_SIZE);
         const auto binIdx = static_cast<int>(streamData->startIndex + step * streamData->sprectrogramSize);
-        const auto mag = getMagnitude(streamData->out, binIdx, FRAMES_PER_BUFFER);
+        const double mag = getComplexMagnitude(signal[binIdx]);
         rawMagnitudes[i] = mag;
         maxRawMagnitude = std::max(maxRawMagnitude, mag);
     }
@@ -323,12 +310,12 @@ bool detectFrequencyCutoff(double* fftOutput, int fftSize, int sampleRate)
 
     double highFreqEnergy = 0.0;
     for (int i = cutoffBin; i < halfSize; ++i)
-        highFreqEnergy += getMagnitude(fftOutput, i, fftSize);
+        highFreqEnergy += getComplexMagnitude(fftOutput[i]);
 
     double midFreqEnergy = 0.0;
     int midStart = static_cast<int>((10000.0 * fftSize) / sampleRate);
     for (int i = midStart; i <= (cutoffBin - 1); ++i)
-        midFreqEnergy += getMagnitude(fftOutput, i, fftSize);
+        midFreqEnergy += getComplexMagnitude(fftOutput[i]);
 
     // The frame is too silent
     if (midFreqEnergy <= MIN_ENERGY)
