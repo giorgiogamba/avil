@@ -368,15 +368,15 @@ void runTUI(ftxui::ScreenInteractive& screen, std::atomic<bool>* running)
     });
 
     // Creates the TUI
-    auto renderer = Renderer([&] {
+    auto renderer = Renderer([&]
+    {
         std::lock_guard<std::mutex> lock(mtxMagnitudes);
 
-        // Spectrum bars
-        Elements bars;
+        Elements spectrumBars;
         for (const float mag : magnitudes)
             // Need to take 1.f - value becuase ftxui doesn't have a
             // bar representation going from bottom to top
-            bars.push_back(gaugeDown(1.f - mag) | color(Color::Green) | flex);
+            spectrumBars.push_back(gaugeDown(1.f - mag) | color(Color::Green) | flex);
 
         // Y axis labels, evenly spaced top to bottom (0dB at top, -60dB at bottom)
         const auto yAxis = vbox({
@@ -419,7 +419,7 @@ void runTUI(ftxui::ScreenInteractive& screen, std::atomic<bool>* running)
             hbox({
                 yAxis,
                 separator(),
-                hbox(bars) | flex,
+                hbox(spectrumBars) | flex,
             }) | flex,
             separator(),
             hbox({text("     "), xAxis | flex}),
