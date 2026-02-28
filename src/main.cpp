@@ -23,7 +23,7 @@ static std::vector<float> magnitudes(DISPLAY_SIZE, 0.f);
 static std::mutex mtxMagnitudes;
 static float magnitudeL = 0.f;
 static float magnitudeR = 0.f;
-static std::string upscalingDetectionResultString = "";
+static std::string upscalingDetectionResultString = "Upscaling analysis: ";
 
 /**
  * @brief Analyzes the passes error and eventually prints its content
@@ -368,15 +368,15 @@ void runTUI(ftxui::ScreenInteractive& screen, std::atomic<bool>* running)
     });
 
     // Creates the TUI
-    auto renderer = Renderer([&] {
+    auto renderer = Renderer([&]
+    {
         std::lock_guard<std::mutex> lock(mtxMagnitudes);
 
-        // Spectrum bars
-        Elements bars;
+        Elements spectrumBars;
         for (const float mag : magnitudes)
             // Need to take 1.f - value becuase ftxui doesn't have a
             // bar representation going from bottom to top
-            bars.push_back(gaugeDown(1.f - mag) | color(Color::Green) | flex);
+            spectrumBars.push_back(gaugeDown(1.f - mag) | color(Color::Green) | flex);
 
         // Y axis labels, evenly spaced top to bottom (0dB at top, -60dB at bottom)
         const auto yAxis = vbox({
@@ -405,7 +405,7 @@ void runTUI(ftxui::ScreenInteractive& screen, std::atomic<bool>* running)
         const auto volumeMeters = hbox({
             text("L ")          | color(Color::Yellow),
             gauge(magnitudeL)   | color(Color::Yellow) | flex,
-            text(" R ")         | color(Color::Yellow),
+            text("R ")         | color(Color::Yellow),
             gauge(magnitudeR)   | color(Color::Yellow) | flex,
         });
 
@@ -414,12 +414,12 @@ void runTUI(ftxui::ScreenInteractive& screen, std::atomic<bool>* running)
             : text(upscalingDetectionResultString) | color(upscalingDetectionResultString == "WARNING" ? Color::Red : Color::Green);
 
         return vbox({
-            text("  avil — spectrum visualizer  ") | bold | center | color(Color::Cyan),
+            text("AVIL — Upscaling Detector and Spectrum Visualizer") | bold | center | color(Color::Cyan),
             separator(),
             hbox({
                 yAxis,
                 separator(),
-                hbox(bars) | flex,
+                hbox(spectrumBars) | flex,
             }) | flex,
             separator(),
             hbox({text("     "), xAxis | flex}),
@@ -554,7 +554,7 @@ int main(int argc, const char* argv[])
         }
         else
         {
-            upscalingDetectionResultString = "File doesn't look upscaled";
+            upscalingDetectionResultString += "The file doesn't look upscaled";
         }
 
         PaStream* stream;
