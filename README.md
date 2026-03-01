@@ -13,6 +13,11 @@
 
 ---
 
+## Why this exists
+When downloading tracks from early 2000s DJ CDs, I often found that files advertised as high quality sounded surprisingly poor. This tool was born out of that frustration — it detects whether an audio file is genuinely high quality or just a low-bitrate MP3 (ripped from sources like YouTube) that has been re-encoded into a lossless format to fake quality.
+
+---
+
 ## Features
 
 **MP3 transcoding detection** — loads a WAV file, runs an FFT-based spectral analysis across multiple frames, and flags files whose high-frequency energy drops off sharply above 16 kHz (a characteristic artifact of MP3 encoding). Reports a verdict based on how many frames exceed the cutoff threshold.
